@@ -5,6 +5,7 @@ __pycache__/
 ig_session.json
 sessionid.txt
 site/
+site_staging/
 media/
 *.wav
 *.mp4

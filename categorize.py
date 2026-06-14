@@ -257,9 +257,15 @@ def generate_tags(caption):
         return []
 
 
-def _caption_plus_transcript(item):
-    # Feed both signals to the LLM: the caption and the spoken transcript.
-    return (item.get("caption") or "") + "\n" + (item.get("transcript") or "")
+def _signal_text(item):
+    # Feed all three signals to the LLM: the caption, the spoken transcript,
+    # and the VLM scene description (visual). Each is NULL-safe, so a missing
+    # column simply contributes an empty line.
+    return (
+        (item.get("caption") or "")
+        + "\n" + (item.get("transcript") or "")
+        + "\n" + (item.get("visual") or "")
+    )
 
 
 def process(item, ctx):
@@ -268,7 +274,7 @@ def process(item, ctx):
     Thin wrapper over the hand-tuned categorize_caption (prompts unchanged).
     The driver's `write` persists via db.set_categories.
     """
-    return categorize_caption(_caption_plus_transcript(item))
+    return categorize_caption(_signal_text(item))
 
 
 def tags_process(item, ctx):
@@ -277,7 +283,7 @@ def tags_process(item, ctx):
     Thin wrapper over the hand-tuned generate_tags (prompts unchanged). The
     driver's `write` persists via db.set_tags.
     """
-    return generate_tags(_caption_plus_transcript(item))
+    return generate_tags(_signal_text(item))
 
 
 def run(db_path="reels.db"):

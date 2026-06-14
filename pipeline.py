@@ -54,6 +54,31 @@ def is_throttle(exc):
     return any(marker in haystack for marker in _THROTTLE_MARKERS)
 
 
+_NETWORK_MARKERS = (
+    "connection refused",
+    "max retries",
+    "timed out",
+    "timeout",
+    "connectionerror",
+    "newconnectionerror",
+    "connection aborted",
+    "connection reset",
+    "temporary failure in name resolution",
+    "failed to establish a new connection",
+)
+
+
+def is_network_error(exc):
+    """True if the exception looks like a raw network/transport failure.
+
+    Conservative on purpose: only covers connection/timeout markers, never
+    generic ValueError/KeyError. A burst of these from an IG-paced stage means
+    IG is unreachable (its real 'wall'), not that the reel itself failed.
+    """
+    haystack = f"{type(exc).__name__} {exc}".lower()
+    return any(marker in haystack for marker in _NETWORK_MARKERS)
+
+
 class ThrottleError(Exception):
     """Raised by an IG-paced stage's process() on a rate-limit/action-block.
 
@@ -117,6 +142,10 @@ def _write_transcript(conn, pk, result):
     dbm.set_transcript(conn, pk, result)
 
 
+def _write_vision(conn, pk, result):
+    dbm.set_visual(conn, pk, result)
+
+
 def _write_categories(conn, pk, result):
     dbm.set_categories(conn, pk, result)
 
@@ -129,6 +158,7 @@ def _build_stages():
     import enrich
     import categorize
     import transcribe
+    import vision
 
     stages = [
         Stage("enrich", None, True, "caption",
@@ -140,6 +170,9 @@ def _build_stages():
               transcribe.download_process, _write_download),
         Stage("transcribe", "download", False, "transcript",
               transcribe.transcribe_process, _write_transcript),
+        # vision runs in parallel with transcribe (both depend on download).
+        Stage("vision", "download", False, "visual",
+              vision.process, _write_vision),
         Stage("categorize", "transcribe", False, "categories",
               categorize.process, _write_categories),
         Stage("tags", "transcribe", False, "tags",
@@ -249,15 +282,19 @@ def _is_empty_terminal(stage, result):
 
 
 def drain(conn, stage_name, ctx, limit=None, delay=0.0, max_attempts=3,
-          batch=25):
+          batch=25, net_abort_after=3):
     """Generic worker loop for one stage. See module docstring."""
     stage = stages()[stage_name]
     enqueue_ready(conn, stage_name)
 
     processed = 0
     done = 0
+    failed = 0
+    skipped = 0
     start = time.time()
+    start_ts = int(start)
     aborted = False
+    consec_net = 0  # consecutive network failures; a burst means IG is down
     seen = set()  # pks handled this drain; never re-process within one run
     while True:
         remaining = None if limit is None else max(limit - processed, 0)
@@ -297,13 +334,35 @@ def drain(conn, stage_name, ctx, limit=None, delay=0.0, max_attempts=3,
                 aborted = True
                 break
             except Exception as exc:
+                if stage.ig_paced and is_network_error(exc):
+                    # IG is unreachable, not the reel's fault. Release it back to
+                    # pending WITHOUT touching attempts, and don't count it as a
+                    # failure. A burst of these is the wall: abort and resume later.
+                    consec_net += 1
+                    dbm.release(conn, pk, stage_name)
+                    print(f"  net {pk}: {exc} (network {consec_net}/"
+                          f"{net_abort_after}, released)", flush=True)
+                    if consec_net >= net_abort_after:
+                        for other in items:
+                            if other["pk"] != pk and other["pk"] not in seen:
+                                dbm.release(conn, other["pk"], stage_name)
+                        _log(f"{stage_name}: network wall on {pk} ({exc}); "
+                             f"{consec_net} consecutive network errors, aborting "
+                             f"run so a later run can resume the remaining reels")
+                        aborted = True
+                        break
+                    continue
+                consec_net = 0
                 dbm.mark(conn, pk, stage_name, "failed", error=str(exc),
                          inc_attempts=True)
                 print(f"  fail {pk}: {exc}", flush=True)
+                failed += 1
                 processed += 1
             else:
+                consec_net = 0
                 if _is_empty_terminal(stage, result):
                     dbm.mark(conn, pk, stage_name, "skipped")
+                    skipped += 1
                 else:
                     stage.write(conn, pk, result)
                     dbm.mark(conn, pk, stage_name, "done")
@@ -319,6 +378,9 @@ def drain(conn, stage_name, ctx, limit=None, delay=0.0, max_attempts=3,
         if aborted:
             break
 
+    end_ts = int(time.time())
+    dbm.record_stage_run(conn, stage_name, start_ts, end_ts, processed, done,
+                         failed, skipped)
     _log(f"{stage_name}: done, {done} reel(s) succeeded out of {processed} "
          f"processed")
     return processed

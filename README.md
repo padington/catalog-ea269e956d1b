@@ -16,11 +16,11 @@ Instagram private API              Local machine (queue-driven)                P
                                           ▲            │  one generic worker (pipeline.drain)
                                           │            ▼  drives every stage off the queue:
                                           │
-        enrich ─► download ─► transcribe ─► categorize ─┐
-        (IG)      (IG)        (whisper)    (ollama)      ├─► build_site.py ─► docs/index.html
-                                            tags ────────┘     (Jinja2 HTML)        │
-                                          (ollama)                              git push
-                                                                                   ▼
+        enrich ─► download ─┬─ transcribe ─► categorize ─┐
+        (IG)      (IG)       │  (whisper)    (ollama)      ├─► build_site.py ─► docs/index.html
+                            │               tags ────────┤     (Jinja2 HTML)        │
+                            └─ vision ──────────────────┘                       git push
+                               (ollama VLM)                                         ▼
                                                                  GitHub Pages (padington.github.io)
 ```
 
@@ -53,13 +53,14 @@ This makes the pipeline:
 
 | File | Role |
 |------|------|
-| `run.py` | argparse orchestrator — entry point for every stage (`scrape`, `thread`, `enrich`, `download`, `transcribe`, `categorize`, `tags`, `status`, `migrate`, `build`, `all`) |
+| `run.py` | argparse orchestrator — entry point for every stage (`scrape`, `thread`, `enrich`, `download`, `transcribe`, `vision`, `categorize`, `tags`, `status`, `stats`, `migrate`, `build`, `all`) |
 | `pipeline.py` | Stage registry (the DAG) + the generic queue-driven worker (`drain`) shared by every stage; throttle detection |
 | `login.py` | One-time Instagram auth → writes `ig_session.json` (session-cookie based, avoids password challenges) |
 | `scrape.py` | Reads DM threads via **raw** private endpoints and extracts shared reels |
 | `enrich.py` | Backfills real captions/thumbnails for reels that arrived caption-less |
 | `transcribe.py` | Downloads the reel's video (IG-paced) and transcribes the audio locally with whisper |
-| `categorize.py` | Picks 1–2 categories + free-form tags from caption+transcript using a local ollama model |
+| `vision.py` | Describes sampled scene-change keyframes of the downloaded mp4 with a local ollama VLM (`qwen2.5vl`), filling the `visual` column |
+| `categorize.py` | Picks 1–2 categories + free-form tags from caption+transcript+visual using a local ollama model |
 | `build_site.py` | Renders `reels.db` into a self-contained static HTML page (Jinja2) |
 | `db.py` | Thin SQLite layer (stdlib only) — `reels` + `queue` schema, upsert/update helpers, queue claim/mark/backfill |
 | `tests/` | Module-by-module unit tests for the pipeline, wiring, self-tests, and backfill |
@@ -81,8 +82,9 @@ parsing the raw JSON. Shared reels show up as DM items of type `xma_clip` /
 table, each gated on its upstream dependency being `done`/`skipped`:
 
 ```
-scrape ──► enrich ──► download ──► transcribe ──► categorize ──► build
-                                              └──► tags ────────┘
+scrape ──► enrich ──► download ─┬─ transcribe ──► categorize ──► build
+                                │                  tags ────────┤
+                                └─ vision ────────────────────┘
 ```
 
 1. **scrape** — Walk the DM inbox (or one thread with cursor pagination), pull every
@@ -97,16 +99,21 @@ scrape ──► enrich ──► download ──► transcribe ──► catego
 4. **transcribe** *(local)* — Extract 16 kHz mono PCM with ffmpeg and run **whisper**
    (`whisper-cli`, `ggml-large-v3-q5_0`) on it. ~600 reels/hr, ~9× real-time — never
    the bottleneck. An empty transcript (silent/music-only) is a valid `done`.
-5. **categorize** *(local)* — Ask a local **ollama** model (`llama3.2`) to pick 1–2
+5. **vision** *(local)* — A twin of transcribe (`depends_on=download`, runs in
+   parallel with it). Samples scene-change keyframes from the mp4 with ffmpeg and
+   describes each with a local **ollama** VLM (`qwen2.5vl`), de-duplicates
+   near-identical scenes, and stores the blob in `visual`. An empty `visual` (no
+   usable frames) is a valid `done`.
+6. **categorize** *(local)* — Ask a local **ollama** model (`llama3.2`) to pick 1–2
    labels *strictly* from a 26-item taxonomy (architecture, cooking, fitness, travel,
-   …) from caption **+ transcript**. Output is post-filtered to drop off-list labels.
-   Falls back to a stub backend if ollama is unreachable.
-6. **tags** *(local)* — Same caption+transcript input, generates free-form descriptive
-   tags via ollama for drill-down search.
-7. **build** — Group reels by category and render one static `index.html`: sticky
+   …) from caption **+ transcript + visual**. Output is post-filtered to drop off-list
+   labels. Falls back to a stub backend if ollama is unreachable.
+7. **tags** *(local)* — Same caption+transcript+visual input, generates free-form
+   descriptive tags via ollama for drill-down search.
+8. **build** — Group reels by category and render one static `index.html`: sticky
    category filter chips, a card grid with lazy thumbnails, click-to-play Instagram
    embeds, and a per-reel tag list in the lightbox modal.
-8. **publish** — Copy the page into `docs/` and `git push`; GitHub Pages serves it.
+9. **publish** — Copy the page into `docs/` and `git push`; GitHub Pages serves it.
 
 ### Migrating an existing database
 
@@ -131,6 +138,7 @@ second time.
 | `shared_by` | username who shared it |
 | `caption` | text caption (after enrich) |
 | `transcript` | local-ASR audio transcript (plain text; `''` = silent/music-only, `NULL` = not yet done) |
+| `visual` | local-VLM scene-description blob (plain text; `''` = no usable frames, `NULL` = not yet done) |
 | `thumbnail_url` | Instagram CDN image (expires after a few weeks) |
 | `taken_at` | original post time |
 | `categories` | JSON array, `NULL` until categorized |
@@ -149,7 +157,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 # one-time: authenticate (writes ig_session.json)
 .venv/bin/python login.py
 
-# full pipeline: scrape → enrich → download → transcribe → categorize → tags → build
+# full pipeline: scrape → enrich → download → transcribe → vision → categorize → tags → build
 .venv/bin/python run.py all
 
 # one-time, on an existing DB: seed the queue from already-populated columns
@@ -161,9 +169,11 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python run.py enrich
 .venv/bin/python run.py download
 .venv/bin/python run.py transcribe
+.venv/bin/python run.py vision
 .venv/bin/python run.py categorize
 .venv/bin/python run.py tags
 .venv/bin/python run.py status        # per-stage queue counts
+.venv/bin/python run.py stats         # per-stage benchmarking (processed/done/items-per-min)
 .venv/bin/python run.py build
 
 # run the tests (no IG / ollama / whisper needed)
@@ -173,7 +183,8 @@ PYTHONPATH=. .venv/bin/python -m unittest discover -s tests
 Database path defaults to `reels.db`; override with `REELS_DB=/path/to.db`.
 Categorizer is configurable via `REELS_CATEGORIZER` (`ollama`/`stub`), `OLLAMA_HOST`,
 `OLLAMA_MODEL`. Whisper is configurable via `REELS_WHISPER_MODEL` /
-`REELS_WHISPER_CLI`.
+`REELS_WHISPER_CLI`. The vision VLM is configurable via `REELS_VLM_MODEL`
+(default `qwen2.5vl`, served by the same ollama at `OLLAMA_HOST`).
 
 ## Publishing updates
 
@@ -207,7 +218,7 @@ inference, no content leaves the machine.
 |-------|-------|--------------|--------|
 | **ASR** (audio → text) | whisper `large-v3-q5` via `whisper-cli` | spoken words, on-audio context | ✅ shipped (transcribe stage) |
 | **LLM** (text → labels) | `llama3.2` via ollama | categories + free-form tags from caption+transcript | ✅ shipped (categorize/tags) |
-| **VLM** (frames → text) | `moondream` via ollama (evaluating `llava` / `qwen2.5-vl`) | *visual* understanding — setting, people, actions, objects, **on-screen text** the audio never mentions | 🔬 in evaluation (A/B prototype) |
+| **VLM** (frames → text) | `qwen2.5vl` via ollama | *visual* understanding — setting, people, actions, objects via scene-change keyframe sampling; augments caption+transcript for categorize/tags | ✅ built (vision stage); staging e2e not yet run |
 | **OCR** (frames → text) | (folded into the VLM prompt for now) | burned-in captions / overlay text | 🔜 planned |
 
 ### Why a VLM, and how it slots in without disturbing anything
@@ -217,19 +228,24 @@ much of the meaning lives *on screen* (recipe text, place names, product shots).
 A vision-language model reads sampled keyframes and emits a short description,
 giving `categorize`/`tags` a third input alongside caption and transcript.
 
-It's designed as a purely **additive** stage — a twin of `transcribe`:
+It's built as a purely **additive** stage — a twin of `transcribe`:
 
-- a new `vision` stage, `depends_on="download"` (reuses the already-downloaded
-  mp4), `ig_paced=False` (fully local), filling a new nullable `visual` column;
+- a `vision` stage (`vision.py`), `depends_on="download"` (reuses the
+  already-downloaded mp4), `ig_paced=False` (fully local), filling a nullable
+  `visual` column;
+- frames are chosen by ffmpeg **scene-change detection** (one per visual cut,
+  capped at 8) with a proportional 25/50/75% fallback; each frame is described by
+  `qwen2.5vl`, near-identical scenes are de-duplicated, and failed-extraction /
+  failed-description frames are dropped (their error text never enters the blob);
 - `categorize`/`tags` consume `caption + transcript + visual` **NULL-safely**, so
   reels without a visual blob behave exactly as today;
 - no existing stage, column, or queue row changes — old reels keep working, and
   the new stage backfills lazily.
 
-A standalone A/B prototype (`vlm_ab.py`) samples 3 keyframes per reel, runs
-moondream on each, and re-runs the *unchanged* categorize/tags twice
-(caption+transcript vs. +visual) to measure exactly what the visual signal adds
-before it's wired into the pipeline.
+The model was validated on real sample videos (a standalone prototype re-ran the
+*unchanged* categorize/tags with and without the visual signal); the staging
+end-to-end drain has not run yet. The `vision` model is configurable via
+`REELS_VLM_MODEL` (default `qwen2.5vl`).
 
 ## Known limitations
 

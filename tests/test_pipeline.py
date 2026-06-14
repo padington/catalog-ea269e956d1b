@@ -205,6 +205,95 @@ class DriverTests(unittest.TestCase):
         finally:
             pipeline._STAGES = saved
 
+    def test_network_wall_releases_without_penalty(self):
+        # N consecutive ConnectionError("Connection refused") from an ig_paced
+        # stage -> drain aborts after net_abort_after; rows stay pending with
+        # attempts unchanged (the reels did not fail on their own merits).
+        conn = _make_conn()
+        _seed(conn, "1", "2", "3", "4")
+        conn.execute("UPDATE reels SET caption=NULL")
+        conn.commit()
+        calls = []
+
+        def proc(item, ctx):
+            calls.append(item["pk"])
+            raise ConnectionError("Connection refused")
+
+        stages = {"a": _stub_stage("a", proc, ig_paced=True)}
+        saved = _install(stages)
+        try:
+            pipeline.drain(conn, "a", StubCtx(conn), net_abort_after=3)
+            # aborted after the 3rd consecutive network error
+            self.assertEqual(len(calls), 3)
+            rows = conn.execute(
+                "SELECT status, attempts FROM queue WHERE stage='a'"
+            ).fetchall()
+            self.assertEqual({r["status"] for r in rows}, {"pending"})
+            self.assertTrue(all(r["attempts"] == 0 for r in rows))
+        finally:
+            pipeline._STAGES = saved
+
+    def test_network_blip_then_success_does_not_abort(self):
+        # A single network blip then successes -> no abort, counter resets.
+        # The blip item (first in batch) is released to pending and not
+        # re-hammered this run; the rest succeed.
+        conn = _make_conn()
+        _seed(conn, "1", "2", "3")
+        conn.execute("UPDATE reels SET caption=NULL")
+        conn.commit()
+        calls = []
+
+        def proc(item, ctx):
+            calls.append(item["pk"])
+            if item["pk"] == "1":
+                raise ConnectionError("Connection refused")
+            return "OK"
+
+        stages = {"a": _stub_stage("a", proc, ig_paced=True)}
+        saved = _install(stages)
+        try:
+            pipeline.drain(conn, "a", StubCtx(conn), net_abort_after=3)
+            statuses = {r["status"] for r in dbm.queue_counts(conn)}
+            # never aborted: nothing left running, no wall reached
+            self.assertNotIn("running", statuses)
+            # "1" hit one blip; counter reset on each subsequent success so the
+            # 3-error wall is never reached. 2 & 3 went done.
+            done_pks = conn.execute(
+                "SELECT pk FROM queue WHERE stage='a' AND status='done'"
+            ).fetchall()
+            self.assertEqual({r["pk"] for r in done_pks}, {"2", "3"})
+            # the blip item was released without burning an attempt
+            r1 = conn.execute(
+                "SELECT status, attempts FROM queue WHERE pk='1'"
+            ).fetchone()
+            self.assertEqual(r1["attempts"], 0)
+            # it was only attempted once this run (in seen, not re-hammered)
+            self.assertEqual(calls.count("1"), 1)
+        finally:
+            pipeline._STAGES = saved
+
+    def test_non_network_exception_still_fails(self):
+        # A normal (non-network) exception -> still 'failed' with attempts++.
+        conn = _make_conn()
+        _seed(conn, "1")
+        conn.execute("UPDATE reels SET caption=NULL WHERE pk='1'")
+        conn.commit()
+
+        def boom(item, ctx):
+            raise ValueError("bad value")
+
+        stages = {"a": _stub_stage("a", boom, ig_paced=True)}
+        saved = _install(stages)
+        try:
+            pipeline.drain(conn, "a", StubCtx(conn), net_abort_after=3)
+            row = conn.execute(
+                "SELECT status, attempts FROM queue WHERE pk='1'"
+            ).fetchone()
+            self.assertEqual(row["status"], "failed")
+            self.assertEqual(row["attempts"], 1)
+        finally:
+            pipeline._STAGES = saved
+
     def test_empty_transcript_is_done_not_retried(self):
         # transcribe returning "" is a valid terminal -> 'done', writes "".
         conn = _make_conn()

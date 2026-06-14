@@ -24,20 +24,24 @@ class WiringTests(unittest.TestCase):
         st = pipeline.stages()
         self.assertEqual(
             list(st),
-            ["enrich", "download", "transcribe", "categorize", "tags"],
+            ["enrich", "download", "transcribe", "vision", "categorize",
+             "tags"],
         )
         self.assertIsNone(st["enrich"].depends_on)
         self.assertEqual(st["download"].depends_on, "enrich")
         self.assertEqual(st["transcribe"].depends_on, "download")
+        self.assertEqual(st["vision"].depends_on, "download")
         self.assertEqual(st["categorize"].depends_on, "transcribe")
         self.assertEqual(st["tags"].depends_on, "transcribe")
         self.assertTrue(st["enrich"].ig_paced)
         self.assertTrue(st["download"].ig_paced)
         self.assertFalse(st["transcribe"].ig_paced)
+        self.assertFalse(st["vision"].ig_paced)
         self.assertFalse(st["categorize"].ig_paced)
         self.assertFalse(st["tags"].ig_paced)
         self.assertIsNone(st["download"].output_col)
         self.assertEqual(st["transcribe"].output_col, "transcript")
+        self.assertEqual(st["vision"].output_col, "visual")
         # every depends_on names a real stage
         for s in st.values():
             if s.depends_on is not None:

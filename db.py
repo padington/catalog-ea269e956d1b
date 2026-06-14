@@ -43,6 +43,21 @@ QUEUE_INDEX = (
     "ON queue(stage, status)"
 )
 
+# Per-stage benchmarking log: one row appended per drain() run.
+STAGE_RUNS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS stage_runs (
+    id         INTEGER PRIMARY KEY,
+    stage      TEXT,
+    started_at INTEGER,
+    ended_at   INTEGER,
+    processed  INTEGER,
+    done       INTEGER,
+    failed     INTEGER,
+    skipped    INTEGER,
+    seconds    REAL
+)
+"""
+
 
 def init_db(conn):
     conn.execute(SCHEMA)
@@ -54,10 +69,15 @@ def init_db(conn):
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(reels)")}
     if "transcript" not in cols:
         conn.execute("ALTER TABLE reels ADD COLUMN transcript TEXT")
+    # Migrate older DBs that predate the local-VLM `visual` column.
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(reels)")}
+    if "visual" not in cols:
+        conn.execute("ALTER TABLE reels ADD COLUMN visual TEXT")
     # Explicit per-stage work queue (replaces the implicit "output IS NULL"
     # discovery). Idempotent: created once, never reset on re-runs.
     conn.execute(QUEUE_SCHEMA)
     conn.execute(QUEUE_INDEX)
+    conn.execute(STAGE_RUNS_SCHEMA)
     conn.commit()
 
 
@@ -140,6 +160,17 @@ def set_transcript(conn, pk, text):
     conn.commit()
 
 
+def set_visual(conn, pk, text):
+    # Store the local-VLM scene-description blob (plain text, not JSON). An
+    # empty string is a valid terminal ("no usable frames") so the reel isn't
+    # retried forever — mirrors set_transcript.
+    conn.execute(
+        "UPDATE reels SET visual = ? WHERE pk = ?",
+        (text, pk),
+    )
+    conn.commit()
+
+
 def iter_untranscribed(conn):
     cur = conn.execute("SELECT * FROM reels WHERE transcript IS NULL")
     for row in cur:
@@ -200,6 +231,7 @@ def backfill_queue(conn):
       transcribe: transcript non-empty -> 'done'; transcript == '' -> 'skipped'
       categorize: categories NOT NULL -> 'done'
       tags:       tags NOT NULL -> 'done'
+      vision:     visual NOT NULL -> 'done'
 
     Returns a summary dict {(stage, status): count} of rows actually inserted.
     """
@@ -209,7 +241,7 @@ def backfill_queue(conn):
     media_dir = transcribe.MEDIA_DIR
 
     rows = conn.execute(
-        "SELECT pk, caption, transcript, categories, tags FROM reels"
+        "SELECT pk, caption, transcript, visual, categories, tags FROM reels"
     ).fetchall()
 
     pending = []  # (pk, stage, status)
@@ -217,6 +249,7 @@ def backfill_queue(conn):
         pk = r["pk"]
         caption = r["caption"]
         transcript = r["transcript"]
+        visual = r["visual"]
         categories = r["categories"]
         tags = r["tags"]
 
@@ -238,6 +271,10 @@ def backfill_queue(conn):
             pending.append((pk, "transcribe", "done"))
         elif transcript == "":
             pending.append((pk, "transcribe", "skipped"))
+
+        # vision: a non-NULL visual blob ("" included) means vision is done.
+        if visual is not None:
+            pending.append((pk, "vision", "done"))
 
         # categorize / tags: presence of the column value is the marker.
         if categories is not None:
@@ -339,6 +376,42 @@ def queue_counts(conn):
     return [dict(row) for row in cur]
 
 
+def record_stage_run(conn, stage, started_at, ended_at, processed, done,
+                     failed, skipped):
+    """Append one benchmarking row for a completed drain() run."""
+    seconds = float(ended_at - started_at)
+    conn.execute(
+        "INSERT INTO stage_runs (stage, started_at, ended_at, processed, done, "
+        "failed, skipped, seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (stage, int(started_at), int(ended_at), processed, done, failed,
+         skipped, seconds),
+    )
+    conn.commit()
+
+
+def stage_run_summary(conn):
+    """Aggregate stage_runs per stage: total processed/done, total seconds, and
+    throughput in items/min. Returns a list of dicts ordered by stage."""
+    cur = conn.execute(
+        "SELECT stage, "
+        "  COUNT(*) AS runs, "
+        "  SUM(processed) AS processed, "
+        "  SUM(done) AS done, "
+        "  SUM(failed) AS failed, "
+        "  SUM(skipped) AS skipped, "
+        "  SUM(seconds) AS seconds "
+        "FROM stage_runs GROUP BY stage ORDER BY stage"
+    )
+    out = []
+    for row in cur:
+        d = dict(row)
+        secs = d.get("seconds") or 0.0
+        proc = d.get("processed") or 0
+        d["items_per_min"] = (proc / secs * 60.0) if secs > 0 else 0.0
+        out.append(d)
+    return out
+
+
 def all_reels(conn):
     cur = conn.execute("SELECT * FROM reels ORDER BY taken_at DESC")
     out = []
@@ -347,6 +420,7 @@ def all_reels(conn):
         d["categories"] = json.loads(d["categories"]) if d["categories"] else []
         d["tags"] = json.loads(d["tags"]) if d.get("tags") else []
         d["transcript"] = d.get("transcript") or ""
+        d["visual"] = d.get("visual") or ""
         out.append(d)
     return out
 

@@ -4,14 +4,16 @@
     python reels-catalog/run.py enrich [--delay S] [--limit N]
     python reels-catalog/run.py download [--limit N] [--delay S]
     python reels-catalog/run.py transcribe [--limit N] [--delay S]
+    python reels-catalog/run.py vision [--limit N] [--delay S]
     python reels-catalog/run.py categorize
     python reels-catalog/run.py tags
     python reels-catalog/run.py status
+    python reels-catalog/run.py stats
     python reels-catalog/run.py migrate
     python reels-catalog/run.py build
     python reels-catalog/run.py all
 
-The per-reel stages (enrich/download/transcribe/categorize/tags) are now driven
+The per-reel stages (enrich/download/transcribe/vision/categorize/tags) are now driven
 by the explicit queue + generic driver in pipeline.py; each subcommand just
 drains its stage.
 """
@@ -61,6 +63,11 @@ def cmd_transcribe(args):
            delay=getattr(args, "delay", 0.0))
 
 
+def cmd_vision(args):
+    _drain("vision", limit=getattr(args, "limit", None),
+           delay=getattr(args, "delay", 0.0))
+
+
 def cmd_categorize(args):
     _drain("categorize")
 
@@ -76,6 +83,26 @@ def cmd_status(args):
     conn = dbm.connect(DB)
     dbm.init_db(conn)
     pipeline.print_status(conn)
+
+
+def cmd_stats(args):
+    import db as dbm
+
+    conn = dbm.connect(DB)
+    dbm.init_db(conn)
+    rows = dbm.stage_run_summary(conn)
+    if not rows:
+        print("no stage runs recorded yet")
+        return
+    header = (f"{'stage':<12} {'runs':>5} {'processed':>10} {'done':>6} "
+              f"{'failed':>7} {'skipped':>8} {'seconds':>9} {'items/min':>10}")
+    print(header)
+    print("-" * len(header))
+    for r in rows:
+        print(f"{r['stage']:<12} {r.get('runs', 0):>5} "
+              f"{r.get('processed') or 0:>10} {r.get('done') or 0:>6} "
+              f"{r.get('failed') or 0:>7} {r.get('skipped') or 0:>8} "
+              f"{r.get('seconds') or 0:>9.1f} {r.get('items_per_min') or 0:>10.1f}")
 
 
 def cmd_migrate(args):
@@ -100,7 +127,8 @@ def cmd_migrate(args):
         for (stage, status), n in sorted(summary.items()):
             print(f"  {stage:<12} {status:<8} {n}")
 
-    for stage in ("enrich", "download", "transcribe", "categorize", "tags"):
+    for stage in ("enrich", "download", "transcribe", "vision", "categorize",
+                  "tags"):
         pipeline.enqueue_ready(conn, stage)
 
     print()
@@ -115,7 +143,8 @@ def cmd_build(args):
 
 def cmd_all(args):
     cmd_scrape(args)
-    for stage in ("enrich", "download", "transcribe", "categorize", "tags"):
+    for stage in ("enrich", "download", "transcribe", "vision", "categorize",
+                  "tags"):
         _drain(stage,
                delay=getattr(args, "delay", 2.0) if stage in ("enrich", "download")
                else 0.0)
@@ -144,6 +173,10 @@ def main(argv=None):
     xp.add_argument("--limit", type=int, default=None)
     xp.add_argument("--delay", type=float, default=0.0)
 
+    vp = sub.add_parser("vision")
+    vp.add_argument("--limit", type=int, default=None)
+    vp.add_argument("--delay", type=float, default=0.0)
+
     tp = sub.add_parser("thread")
     tp.add_argument("--thread-id", required=True, dest="thread_id")
     tp.add_argument("--max", type=int, default=300)
@@ -152,14 +185,16 @@ def main(argv=None):
     sub.add_parser("categorize")
     sub.add_parser("tags")
     sub.add_parser("status")
+    sub.add_parser("stats")
     sub.add_parser("migrate")
     sub.add_parser("build")
 
     args = p.parse_args(argv)
     {"scrape": cmd_scrape, "thread": cmd_thread, "enrich": cmd_enrich,
      "download": cmd_download, "transcribe": cmd_transcribe,
-     "categorize": cmd_categorize, "tags": cmd_tags, "status": cmd_status,
-     "migrate": cmd_migrate, "build": cmd_build, "all": cmd_all}[args.cmd](args)
+     "vision": cmd_vision, "categorize": cmd_categorize, "tags": cmd_tags,
+     "status": cmd_status, "stats": cmd_stats, "migrate": cmd_migrate,
+     "build": cmd_build, "all": cmd_all}[args.cmd](args)
 
 
 if __name__ == "__main__":
