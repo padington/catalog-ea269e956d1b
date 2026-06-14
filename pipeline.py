@@ -157,6 +157,8 @@ def _write_tags(conn, pk, result):
 def _build_stages():
     import enrich
     import categorize
+    import download
+    import tags
     import transcribe
     import vision
 
@@ -167,7 +169,7 @@ def _build_stages():
               # enrich.needs_enrichment). Fixed constant, parameter-free.
               ready_predicate="(r.caption IS NULL OR r.caption LIKE 'Reel by @%')"),
         Stage("download", "enrich", True, None,
-              transcribe.download_process, _write_download),
+              download.download_process, _write_download),
         Stage("transcribe", "download", False, "transcript",
               transcribe.transcribe_process, _write_transcript),
         # vision runs in parallel with transcribe (both depend on download).
@@ -176,7 +178,7 @@ def _build_stages():
         Stage("categorize", "transcribe", False, "categories",
               categorize.process, _write_categories),
         Stage("tags", "transcribe", False, "tags",
-              categorize.tags_process, _write_tags),
+              tags.tags_process, _write_tags),
     ]
     return OrderedDict((s.name, s) for s in stages)
 
@@ -271,13 +273,13 @@ def enqueue_ready(conn, stage_name):
 def _is_empty_terminal(stage, result):
     """A stage may signal a no-op terminal that must never be retried.
 
-    download returns transcribe.NO_VIDEO when the reel has no video. We map it
+    download returns download.NO_VIDEO when the reel has no video. We map it
     to 'skipped'. (transcribe's empty "" transcript is NOT empty-terminal here:
     it is a valid 'done' state handled in the success path below.)
     """
     if stage.name == "download":
-        import transcribe
-        return result is transcribe.NO_VIDEO
+        import download
+        return result is download.NO_VIDEO
     return False
 
 

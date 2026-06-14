@@ -27,19 +27,13 @@ Env vars:
 """
 
 import base64
-import glob
-import json
 import os
 import re
-import subprocess
 import tempfile
-import urllib.request
 
-import categorize as cz
-import transcribe
-
-FFMPEG = "/opt/homebrew/bin/ffmpeg"
-FFPROBE = "/opt/homebrew/bin/ffprobe"
+import llm
+from ffmpeg import duration, proportional_frames, scene_frames
+from storage import media_path
 
 VISION_MODEL = os.environ.get("REELS_VLM_MODEL", "qwen2.5vl")
 
@@ -54,72 +48,10 @@ FRAME_PROMPT = (
 )
 
 
-def duration(path):
-    out = subprocess.run(
-        [FFPROBE, "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", path],
-        capture_output=True, text=True)
-    try:
-        return float(out.stdout.strip())
-    except ValueError:
-        return 0.0
-
-
-def scene_frames(mp4, outdir):
-    """Extract one JPG per scene change. Returns [(timestamp, jpg_path), ...]
-    or None if no scene cuts were detected (caller falls back to proportional).
-    Any ffmpeg failure -> None (guarded; never raises into the blob)."""
-    pattern = os.path.join(outdir, "s_%03d.jpg")
-    try:
-        p = subprocess.run(
-            [FFMPEG, "-y", "-i", mp4, "-vf",
-             f"select='gt(scene,{SCENE_THRESHOLD})',showinfo,scale=512:-1",
-             "-vsync", "vfr", "-q:v", "3", pattern],
-            capture_output=True, text=True)
-    except Exception:
-        return None
-    times = re.findall(r"pts_time:([0-9.]+)", p.stderr)
-    files = sorted(glob.glob(os.path.join(outdir, "s_*.jpg")))
-    pairs = list(zip(times, files))
-    if not pairs:
-        return None
-    if len(pairs) > MAX_FRAMES:
-        step = (len(pairs) - 1) / (MAX_FRAMES - 1)
-        idx = sorted({round(i * step) for i in range(MAX_FRAMES)})
-        pairs = [pairs[i] for i in idx]
-    return [(float(t), f) for t, f in pairs]
-
-
-def proportional_frames(mp4, dur, outdir):
-    """Fallback: 25/50/75% snapshots. Failed grabs are skipped, not recorded."""
-    out = []
-    for frac in (0.25, 0.5, 0.75):
-        t = dur * frac
-        jpg = os.path.join(outdir, f"p{int(frac*100)}.jpg")
-        try:
-            subprocess.run(
-                [FFMPEG, "-y", "-ss", f"{t:.2f}", "-i", mp4, "-frames:v", "1",
-                 "-q:v", "3", "-vf", "scale=512:-1", jpg],
-                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            out.append((t, jpg))
-        except Exception:
-            continue  # GUARD: drop the failed frame, no error text
-    return out
-
-
 def vlm_describe(jpg_path):
     with open(jpg_path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
-    payload = json.dumps({
-        "model": VISION_MODEL, "stream": False, "prompt": FRAME_PROMPT,
-        "images": [b64],
-    }).encode()
-    req = urllib.request.Request(
-        cz.OLLAMA_HOST.rstrip("/") + "/api/generate",
-        data=payload, headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=300) as resp:
-        body = json.loads(resp.read().decode())
-    return (body.get("response") or "").strip()
+    return llm.generate(FRAME_PROMPT, images=[b64], model=VISION_MODEL)
 
 
 _NORM = re.compile(r"[^a-z0-9 ]")
@@ -159,7 +91,8 @@ def describe_video(mp4):
     dur = duration(mp4) or 1.0
     tmp = tempfile.mkdtemp()
     try:
-        frames = scene_frames(mp4, tmp)
+        frames = scene_frames(mp4, tmp, max_frames=MAX_FRAMES,
+                              threshold=SCENE_THRESHOLD)
         sampling = "scene"
         if not frames:
             frames = proportional_frames(mp4, dur, tmp)
@@ -191,7 +124,7 @@ def process(item, ctx):
     catches up (mirrors transcribe.transcribe_process). `ctx` is unused.
     """
     pk = item["pk"]
-    mp4_path = transcribe.media_path(pk)
+    mp4_path = media_path(pk)
     if not (os.path.exists(mp4_path) and os.path.getsize(mp4_path) > 0):
         raise FileNotFoundError(f"no media for {pk}; download stage not done yet")
     blob, _scenes, _sampling = describe_video(mp4_path)

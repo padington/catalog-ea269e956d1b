@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import categorize
 import db as dbm
+import llm
 import pipeline
 import vision
 
@@ -76,7 +77,7 @@ class VisionProcessTests(unittest.TestCase):
         orig_vlm = vision.vlm_describe
         try:
             vision.duration = lambda mp4: 10.0
-            vision.scene_frames = lambda mp4, outdir: [
+            vision.scene_frames = lambda mp4, outdir, **kw: [
                 (0.0, "a.jpg"), (1.0, "b.jpg"), (2.0, "c.jpg"), (3.0, "d.jpg")]
             vision.vlm_describe = lambda jpg: next(descs)
             blob, scenes, sampling = vision.describe_video("/fake.mp4")
@@ -98,7 +99,7 @@ class VisionProcessTests(unittest.TestCase):
         orig_vlm = vision.vlm_describe
         try:
             vision.duration = lambda mp4: 5.0
-            vision.scene_frames = lambda mp4, outdir: [
+            vision.scene_frames = lambda mp4, outdir, **kw: [
                 (0.0, "good.jpg"), (1.0, "bad.jpg")]
             vision.vlm_describe = flaky
             blob, scenes, _ = vision.describe_video("/fake.mp4")
@@ -134,7 +135,7 @@ class VisionProcessTests(unittest.TestCase):
 class CategorizeVisualSignalTests(unittest.TestCase):
     def test_signal_text_includes_visual_nullsafe(self):
         item = {"caption": "cap", "transcript": "tr", "visual": "vis"}
-        text = categorize._signal_text(item)
+        text = llm.signal_text(item)
         self.assertIn("cap", text)
         self.assertIn("tr", text)
         self.assertIn("vis", text)
@@ -142,26 +143,27 @@ class CategorizeVisualSignalTests(unittest.TestCase):
     def test_signal_text_visual_null_ok(self):
         # visual NULL/missing must not raise and must still carry caption+transcript.
         item = {"caption": "cap", "transcript": "tr", "visual": None}
-        text = categorize._signal_text(item)
+        text = llm.signal_text(item)
         self.assertIn("cap", text)
         self.assertIn("tr", text)
         # missing key entirely
-        text2 = categorize._signal_text({"caption": "cap"})
+        text2 = llm.signal_text({"caption": "cap"})
         self.assertIn("cap", text2)
 
     def test_process_and_tags_use_visual(self):
+        import tags as tagsmod
         captured = {}
         orig_cat = categorize.categorize_caption
-        orig_tags = categorize.generate_tags
+        orig_tags = tagsmod.generate_tags
         try:
             categorize.categorize_caption = lambda t: captured.setdefault("cat", t) or ["other"]
-            categorize.generate_tags = lambda t: captured.setdefault("tag", t) or []
+            tagsmod.generate_tags = lambda t: captured.setdefault("tag", t) or []
             item = {"pk": "1", "caption": "cap", "transcript": "tr", "visual": "kitchen scene"}
             categorize.process(item, None)
-            categorize.tags_process(item, None)
+            tagsmod.tags_process(item, None)
         finally:
             categorize.categorize_caption = orig_cat
-            categorize.generate_tags = orig_tags
+            tagsmod.generate_tags = orig_tags
         self.assertIn("kitchen scene", captured["cat"])
         self.assertIn("kitchen scene", captured["tag"])
 

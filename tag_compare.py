@@ -9,6 +9,7 @@ import json
 import sqlite3
 
 import categorize as cz
+import tags as tagsmod
 
 c = sqlite3.connect("reels.db")
 c.row_factory = sqlite3.Row
@@ -24,10 +25,10 @@ for r in rows:
     combined = (cap + "\n" + tr).strip()
 
     a_cats = cz.categorize_caption(cap) if cap else ["other"]
-    a_tags = cz.generate_tags(cap) if cap else []
+    a_tags = tagsmod.generate_tags(cap) if cap else []
     description = cz._describe_reel(combined)
     b_cats = cz.categorize_caption(combined)
-    b_tags = cz.generate_tags(combined)
+    b_tags = tagsmod.generate_tags(combined)
 
     new_cats = [x for x in b_cats if x not in set(a_cats)]
     new_tags = [t for t in b_tags if t not in set(a_tags)]
