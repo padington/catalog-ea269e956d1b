@@ -4,6 +4,7 @@ No external CDN: the minimal CSS/JS is inlined. Client-side category filtering
 is plain JS. A reel with multiple categories is rendered once per category.
 """
 
+import datetime as dt
 import html
 import os
 
@@ -25,6 +26,10 @@ TEMPLATE = """<!DOCTYPE html>
   .filters button { margin: 2px; padding: .3rem .7rem; border: 1px solid #ccc;
     border-radius: 999px; background: #fff; cursor: pointer; font-size: .85rem; }
   .filters button.active { background: #222; color: #fff; border-color: #222; }
+  .sort { margin-top: .5rem; font-size: .8rem; color: #888; }
+  .sort button { margin: 0 2px; padding: .2rem .6rem; border: 1px solid #ccc;
+    border-radius: 999px; background: #fff; cursor: pointer; font-size: .8rem; }
+  .sort button.active { background: #222; color: #fff; border-color: #222; }
   section { padding: 1rem; }
   h2 { font-size: 1rem; text-transform: capitalize; border-bottom: 2px solid #eee; padding-bottom: .25rem; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; }
@@ -51,6 +56,10 @@ TEMPLATE = """<!DOCTYPE html>
     <button data-cat="{{ cat }}" onclick="filterCat('{{ cat }}', this)">{{ cat }}</button>
     {% endfor %}
   </div>
+  <div class="sort">sort:
+    <button class="active" data-sort="new" onclick="sortReels('new', this)">newest</button>
+    <button data-sort="old" onclick="sortReels('old', this)">oldest</button>
+  </div>
 </header>
 
 {% for cat in categories %}
@@ -58,7 +67,7 @@ TEMPLATE = """<!DOCTYPE html>
   <h2>{{ cat }} ({{ grouped[cat]|length }})</h2>
   <div class="grid">
     {% for r in grouped[cat] %}
-    <div class="card" data-code="{{ r.shortcode }}">
+    <div class="card" data-code="{{ r.shortcode }}" data-ts="{{ r.taken_at or 0 }}">
       {% if r.shortcode %}
       <div class="thumb" onclick="playReel(this)">
         {% if r.thumbnail_url %}<img src="{{ r.thumbnail_url }}" alt="" loading="lazy">{% endif %}
@@ -70,6 +79,7 @@ TEMPLATE = """<!DOCTYPE html>
       <div class="body">
         {{ r.snippet }}
         {% if r.shared_by %}<div class="by">shared by {{ r.shared_by }}</div>{% endif %}
+        {% if r.shared_date %}<div class="by">shared {{ r.shared_date }}</div>{% endif %}
         {% if r.url %}<a class="open" href="{{ r.url }}" target="_blank" rel="noopener">open on Instagram &#8599;</a>{% endif %}
       </div>
     </div>
@@ -84,6 +94,18 @@ function filterCat(cat, btn) {
   btn.classList.add('active');
   document.querySelectorAll('.cat-section').forEach(s => {
     s.style.display = (cat === 'all' || s.dataset.cat === cat) ? '' : 'none';
+  });
+}
+function sortReels(mode, btn) {
+  document.querySelectorAll('.sort button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.grid').forEach(grid => {
+    var cards = Array.prototype.slice.call(grid.querySelectorAll('.card'));
+    cards.sort(function (a, b) {
+      var ta = +a.dataset.ts || 0, tb = +b.dataset.ts || 0;
+      return mode === 'new' ? tb - ta : ta - tb;
+    });
+    cards.forEach(c => grid.appendChild(c));
   });
 }
 function playReel(thumb) {
@@ -119,6 +141,10 @@ def build(db_path="reels.db", out_dir=SITE_DIR):
     grouped = {}
     for r in reels:
         r["snippet"] = _snippet(r.get("caption"))
+        ts = r.get("taken_at")
+        r["shared_date"] = (
+            dt.datetime.fromtimestamp(ts).strftime("%b %d, %Y") if ts else None
+        )
         cats = r.get("categories") or ["other"]
         for cat in cats:
             grouped.setdefault(cat, []).append(r)

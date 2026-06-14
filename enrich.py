@@ -12,8 +12,13 @@ the better text. Runs are resumable: failures are caught per-item and printed.
 
 import os
 import time
+from datetime import datetime
 
 import db as dbm
+
+
+def _log(msg):
+    print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
 SESSION_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ig_session.json")
 
@@ -72,32 +77,38 @@ def run(db_path="reels.db", delay=2.0, limit=None):
     cl = load_client()
 
     pks = list(needs_enrichment(conn))
+    total = len(pks)
+    _log(f"enrich: {total} reel(s) need captions")
     enriched = 0
+    processed = 0
+    start = time.time()
     for pk in pks:
         if limit is not None and enriched >= limit:
             break
         try:
             info = fetch_caption(cl, pk)
             caption = info.get("caption") if info else None
-            if not caption:
-                time.sleep(delay)
-                continue
-
-            fields = {"caption": caption, "categories": None}
-            code = info.get("code")
-            if code:
-                fields["shortcode"] = code
-                fields["url"] = f"https://www.instagram.com/reel/{code}/"
-            if info.get("thumbnail_url"):
-                fields["thumbnail_url"] = info["thumbnail_url"]
-
-            dbm.update_reel(conn, pk, fields)
-            enriched += 1
+            if caption:
+                fields = {"caption": caption, "categories": None}
+                code = info.get("code")
+                if code:
+                    fields["shortcode"] = code
+                    fields["url"] = f"https://www.instagram.com/reel/{code}/"
+                if info.get("thumbnail_url"):
+                    fields["thumbnail_url"] = info["thumbnail_url"]
+                dbm.update_reel(conn, pk, fields)
+                enriched += 1
         except Exception as exc:
-            print(f"  skip {pk}: {exc}")
+            print(f"  skip {pk}: {exc}", flush=True)
+        processed += 1
+        if processed % 25 == 0 or processed == total:
+            rate = processed / max(time.time() - start, 1e-9)
+            eta = (total - processed) / rate if rate else 0
+            _log(f"enrich: {processed}/{total} processed | {enriched} captioned | "
+                 f"{rate*60:.0f}/min | eta {eta/60:.0f}m")
         time.sleep(delay)
 
-    print(f"enriched {enriched} reel(s)")
+    _log(f"enrich: done, {enriched} reel(s) captioned out of {total}")
 
 
 if __name__ == "__main__":

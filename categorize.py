@@ -111,16 +111,29 @@ def categorize_caption(caption):
 
 
 def run(db_path="reels.db"):
+    import time
+    from datetime import datetime
     import db as dbm
+
+    def _log(msg):
+        print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
     conn = dbm.connect(db_path)
     dbm.init_db(conn)
+    reels = list(dbm.iter_uncategorized(conn))
+    total = len(reels)
+    _log(f"categorize: {total} reel(s) to classify (backend={REELS_CATEGORIZER})")
     n = 0
-    for reel in list(dbm.iter_uncategorized(conn)):
+    start = time.time()
+    for reel in reels:
         cats = categorize_caption(reel.get("caption"))
         dbm.set_categories(conn, reel["pk"], cats)
         n += 1
-    print(f"categorized {n} reel(s)")
+        if n % 50 == 0 or n == total:
+            rate = n / max(time.time() - start, 1e-9)
+            eta = (total - n) / rate if rate else 0
+            _log(f"categorize: {n}/{total} | {rate*60:.0f}/min | eta {eta/60:.0f}m")
+    _log(f"categorize: done, {n} reel(s) classified")
 
 
 if __name__ == "__main__":
