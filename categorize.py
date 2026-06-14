@@ -101,11 +101,83 @@ def _ollama_backend(caption):
     return cats or ["other"]
 
 
+def _ollama_chat(system, user):
+    """One chat turn against ollama; returns the raw message content string."""
+    payload = json.dumps(
+        {
+            "model": OLLAMA_MODEL,
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        OLLAMA_HOST.rstrip("/") + "/api/chat",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        body = json.loads(resp.read().decode("utf-8"))
+    return body.get("message", {}).get("content", "")
+
+
+_DESCRIBE_SYSTEM = (
+    "You are given the caption and/or spoken transcript of an Instagram reel. "
+    "In 1-2 factual sentences, describe what the reel is actually about: its "
+    "subject, the activity shown or discussed, and the main message or point. "
+    "Be concrete and neutral. Output only the description, no preamble."
+)
+
+
+def _describe_reel(text):
+    """Pass 1: a short meta-description of what the reel is about."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    try:
+        return _ollama_chat(_DESCRIBE_SYSTEM, "Reel caption/transcript:\n" + text).strip()
+    except Exception:
+        return ""
+
+
+def _classify_from_description(description):
+    """Pass 2: pick 1-2 allowed categories for a reel description."""
+    categories = ", ".join(sorted(ALLOWED))
+    system = (
+        "You assign topic categories to an Instagram reel given a short "
+        "description of it. Choose the 1-2 categories that best fit, STRICTLY "
+        f"from this allowed list: {categories}. Respond with ONLY a JSON array "
+        "of lowercase category strings from that list and nothing else. If "
+        'nothing fits, return ["other"]. Do NOT invent new categories and do '
+        "NOT use a person's name as a category."
+    )
+    text = _ollama_chat(system, "Description:\n" + description)
+    match = re.search(r"\[.*?\]", text, re.DOTALL)
+    if not match:
+        return ["other"]
+    try:
+        items = json.loads(match.group(0))
+    except (ValueError, TypeError):
+        return ["other"]
+    cats = [str(x).strip().lower() for x in items if str(x).strip()]
+    cats = [c for c in cats if c in ALLOWED]
+    return cats or ["other"]
+
+
 def categorize_caption(caption):
+    # Two-pass: describe the reel first, then classify that description. The
+    # description step gives the classifier clean subject matter to work from
+    # instead of a junk/emoji caption, and keeps the closed-set post-filter.
     if REELS_CATEGORIZER == "stub":
         return _stub_backend(caption)
     try:
-        return _ollama_backend(caption)
+        desc = _describe_reel(caption) or (caption or "")
+        if not desc.strip():
+            return ["other"]
+        return _classify_from_description(desc)
     except Exception:
         return _stub_backend(caption)
 
@@ -139,14 +211,23 @@ def generate_tags(caption):
     if not caption:
         return []
     system = (
-        "You extract specific topic tags from an Instagram reel caption. "
-        "Return 5 to 10 short, lowercase tags naming concrete things in the "
-        "reel: techniques, objects, places, ingredients, equipment, styles. "
-        "Prefer specific over generic (e.g. 'kettlebell' not 'fitness'). "
-        "Each tag is 1-2 words. Respond with ONLY a JSON array of strings, "
-        'e.g. ["kettlebell","deadlift","home-workout"].'
+        "You extract topic tags from the caption and spoken transcript of an "
+        "Instagram reel. Return 5 to 10 short, lowercase tags that together "
+        "capture what the reel is about: BOTH concrete things (objects, "
+        "ingredients, equipment, places, techniques) AND abstract topics or "
+        "themes (concepts, emotions, fields of knowledge, the message). Prefer "
+        "specific over generic. Each tag is 1-3 words; join multi-word tags "
+        "with hyphens. Respond with ONLY a JSON array of strings, no prose.\n"
+        "The pairs below show the FORMAT on UNRELATED reels — never reuse these "
+        "tags unless they genuinely describe the reel you are given:\n"
+        '  morning skincare routine -> ["skincare","retinol","moisturizer","beauty-routine","sunscreen"]\n'
+        '  weekend trip to lisbon   -> ["travel","lisbon","city-guide","portugal","itinerary"]\n'
+        '  python async tutorial    -> ["python","async","coding","programming","tutorial"]\n'
+        '  index-fund investing tip  -> ["investing","index-funds","personal-finance","compounding","portfolio"]\n'
+        '  raised-bed gardening      -> ["gardening","raised-beds","composting","vegetables","soil"]\n'
+        '  stand-up comedy clip      -> ["comedy","stand-up","crowd-work","joke","timing"]'
     )
-    user = "Caption:\n" + caption
+    user = "Caption/transcript:\n" + caption
     payload = json.dumps(
         {
             "model": OLLAMA_MODEL,
@@ -174,6 +255,29 @@ def generate_tags(caption):
         return _normalize_tags(items)
     except Exception:
         return []
+
+
+def _caption_plus_transcript(item):
+    # Feed both signals to the LLM: the caption and the spoken transcript.
+    return (item.get("caption") or "") + "\n" + (item.get("transcript") or "")
+
+
+def process(item, ctx):
+    """Local LLM stage: categories from caption + transcript combined.
+
+    Thin wrapper over the hand-tuned categorize_caption (prompts unchanged).
+    The driver's `write` persists via db.set_categories.
+    """
+    return categorize_caption(_caption_plus_transcript(item))
+
+
+def tags_process(item, ctx):
+    """Local LLM stage: free-form tags from caption + transcript combined.
+
+    Thin wrapper over the hand-tuned generate_tags (prompts unchanged). The
+    driver's `write` persists via db.set_tags.
+    """
+    return generate_tags(_caption_plus_transcript(item))
 
 
 def run(db_path="reels.db"):

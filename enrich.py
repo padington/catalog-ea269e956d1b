@@ -71,6 +71,35 @@ def fetch_caption(cl, pk):
         return None
 
 
+def build_fields(info):
+    """Map a fetch_caption() result to the reels columns enrich writes.
+
+    Returns None when there is no usable caption (so the driver skips the row).
+    """
+    caption = info.get("caption") if info else None
+    if not caption:
+        return None
+    fields = {"caption": caption, "categories": None}
+    code = info.get("code")
+    if code:
+        fields["shortcode"] = code
+        fields["url"] = f"https://www.instagram.com/reel/{code}/"
+    if info.get("thumbnail_url"):
+        fields["thumbnail_url"] = info["thumbnail_url"]
+    return fields
+
+
+def process(item, ctx):
+    """IG-paced stage: fetch the real caption/shortcode/thumbnail for a reel.
+
+    Returns the dict of reels columns to UPDATE, or None when nothing usable
+    came back (driver marks 'skipped'). The driver's `write` persists via
+    db.update_reel.
+    """
+    info = fetch_caption(ctx.client, item["pk"])
+    return build_fields(info)
+
+
 def run(db_path="reels.db", delay=2.0, limit=None):
     conn = dbm.connect(db_path)
     dbm.init_db(conn)

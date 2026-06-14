@@ -1,40 +1,70 @@
 # Reels Catalogue
 
-A hands-off pipeline that scrapes the Instagram reels figures out what each one is about, and publishes a browsable, category-filtered
-catalogue to GitHub Pages — with click-to-play Instagram embeds.
+A hands-off pipeline that scrapes the Instagram reels, figures out what each one
+is about, and publishes a browsable, category-filtered catalogue to GitHub Pages
+— with click-to-play Instagram embeds.
 
 ## Architecture
 
 ```
-Instagram private API                Local machine                      Public web
-─────────────────────         ──────────────────────────         ───────────────────
-                                                                   
-  direct_v2/inbox/  ─┐                                            
-  direct_v2/threads/ ├─► scrape.py ──► reels.db ──► build_site.py ──► docs/index.html
-  media/{pk}/info/  ─┘        ▲          (SQLite)         ▲                 │
-                             │            │  ▲            │            git push
-                        enrich.py ────────┘  │       (Jinja2 HTML)         │
-                             │                │                            ▼
-                        categorize.py ────────┘              GitHub Pages (padington.github.io)
-                          (ollama llama3.2)
+Instagram private API              Local machine (queue-driven)                Public web
+─────────────────────       ─────────────────────────────────────       ───────────────────
+
+  direct_v2/inbox/  ─┐
+  direct_v2/threads/ ├─► scrape.py ──► reels.db ◄── queue table (per-stage state machine)
+  media/{pk}/info/  ─┘                 (SQLite)        │
+                                          ▲            │  one generic worker (pipeline.drain)
+                                          │            ▼  drives every stage off the queue:
+                                          │
+        enrich ─► download ─► transcribe ─► categorize ─┐
+        (IG)      (IG)        (whisper)    (ollama)      ├─► build_site.py ─► docs/index.html
+                                            tags ────────┘     (Jinja2 HTML)        │
+                                          (ollama)                              git push
+                                                                                   ▼
+                                                                 GitHub Pages (padington.github.io)
 ```
 
 Everything runs locally. The only thing that leaves your machine is the generated
 `docs/index.html` (captions, thumbnails, shortcodes) — pushed to a **public** repo
-with a random, unguessable name. Credentials and the database never leave.
+with a random, unguessable name. Credentials, the database, and downloaded media
+never leave.
+
+### The queue
+
+Work is no longer discovered implicitly (`WHERE output_col IS NULL`). Each reel's
+progress through the pipeline is tracked explicitly in a `queue(pk, stage, status,
+attempts, error, updated_at)` table, where `status ∈ {pending, running, done,
+failed, skipped}`. A single generic worker (`pipeline.drain`) drives every stage:
+it enqueues reels whose upstream dependency is `done`, claims a batch under a
+lease, runs the stage's pure `process()` function, and writes the result back.
+
+This makes the pipeline:
+- **Modular & testable** — each stage is a pure `process(item, ctx) -> result`
+  plus a `write(conn, pk, result)` callback, unit-tested with fixtures (no IG /
+  ollama / whisper needed). See `tests/`.
+- **Resumable & rate-limit-safe** — IG-paced stages (enrich, download) jitter
+  their sleeps and abort cleanly on throttle (`ThrottleError`), releasing claimed
+  work so a later run resumes. Local stages (transcribe, categorize, tags) run at
+  full speed.
+- **Decoupled** — downloading is IG-paced (~3/min) but transcription is local
+  (~600/hr), so the slow IG step never blocks the fast local one.
 
 ## Components
 
 | File | Role |
 |------|------|
-| `run.py` | argparse orchestrator — entry point for every stage (`scrape`, `thread`, `enrich`, `categorize`, `build`, `all`) |
+| `run.py` | argparse orchestrator — entry point for every stage (`scrape`, `thread`, `enrich`, `download`, `transcribe`, `categorize`, `tags`, `status`, `migrate`, `build`, `all`) |
+| `pipeline.py` | Stage registry (the DAG) + the generic queue-driven worker (`drain`) shared by every stage; throttle detection |
 | `login.py` | One-time Instagram auth → writes `ig_session.json` (session-cookie based, avoids password challenges) |
 | `scrape.py` | Reads DM threads via **raw** private endpoints and extracts shared reels |
 | `enrich.py` | Backfills real captions/thumbnails for reels that arrived caption-less |
-| `categorize.py` | Tags each reel with 1–2 categories from a fixed taxonomy using a local ollama model |
+| `transcribe.py` | Downloads the reel's video (IG-paced) and transcribes the audio locally with whisper |
+| `categorize.py` | Picks 1–2 categories + free-form tags from caption+transcript using a local ollama model |
 | `build_site.py` | Renders `reels.db` into a self-contained static HTML page (Jinja2) |
-| `db.py` | Thin SQLite layer (stdlib only) — schema + upsert/update/iterate helpers |
+| `db.py` | Thin SQLite layer (stdlib only) — `reels` + `queue` schema, upsert/update helpers, queue claim/mark/backfill |
+| `tests/` | Module-by-module unit tests for the pipeline, wiring, self-tests, and backfill |
 | `reels.db` | SQLite store (local only, git-ignored) |
+| `media/` | Downloaded `{pk}.mp4` files (local only, git-ignored) |
 | `docs/index.html` | The published catalogue (served by GitHub Pages) |
 
 ### Why raw JSON for scraping
@@ -47,20 +77,46 @@ parsing the raw JSON. Shared reels show up as DM items of type `xma_clip` /
 
 ## Data flow / pipeline stages
 
+`scrape` seeds the table; the rest are **queue stages** driven off the `queue`
+table, each gated on its upstream dependency being `done`/`skipped`:
+
+```
+scrape ──► enrich ──► download ──► transcribe ──► categorize ──► build
+                                              └──► tags ────────┘
+```
+
 1. **scrape** — Walk the DM inbox (or one thread with cursor pagination), pull every
    shared-reel item, and `INSERT OR IGNORE` it into `reels.db`. Resumable: re-running
    never duplicates. Many DM shares have no caption, so they land as `Reel by @handle`.
-2. **enrich** — For rows with a missing/placeholder caption, call `media/{pk}/info/`
-   to fetch the real caption, canonical shortcode/URL, and a fresh thumbnail. Enriched
-   rows get their `categories` reset to `NULL` so they’ll be re-categorized.
-3. **categorize** — For each uncategorized row, ask a local **ollama** model
-   (`llama3.2`) to pick 1–2 labels *strictly* from a 26-item taxonomy (architecture,
-   cooking, fitness, travel, …). Output is post-filtered to drop anything off-list.
+2. **enrich** *(IG-paced)* — For rows with a missing/`Reel by @` placeholder caption,
+   call `media/{pk}/info/` to fetch the real caption, canonical shortcode/URL, and a
+   fresh thumbnail.
+3. **download** *(IG-paced)* — Fetch the reel's `.mp4` into `media/{pk}.mp4`. Reels
+   with no video are marked `skipped` (terminal, never retried). This is the slow,
+   rate-limited step (~3/min); it's split out so transcription can run independently.
+4. **transcribe** *(local)* — Extract 16 kHz mono PCM with ffmpeg and run **whisper**
+   (`whisper-cli`, `ggml-large-v3-q5_0`) on it. ~600 reels/hr, ~9× real-time — never
+   the bottleneck. An empty transcript (silent/music-only) is a valid `done`.
+5. **categorize** *(local)* — Ask a local **ollama** model (`llama3.2`) to pick 1–2
+   labels *strictly* from a 26-item taxonomy (architecture, cooking, fitness, travel,
+   …) from caption **+ transcript**. Output is post-filtered to drop off-list labels.
    Falls back to a stub backend if ollama is unreachable.
-4. **build** — Group reels by category and render one static `index.html`: sticky
-   category filter chips (client-side JS), a card grid with lazy thumbnails, and
-   click-to-play Instagram embeds.
-5. **publish** — Copy the page into `docs/` and `git push`; GitHub Pages serves it.
+6. **tags** *(local)* — Same caption+transcript input, generates free-form descriptive
+   tags via ollama for drill-down search.
+7. **build** — Group reels by category and render one static `index.html`: sticky
+   category filter chips, a card grid with lazy thumbnails, click-to-play Instagram
+   embeds, and a per-reel tag list in the lightbox modal.
+8. **publish** — Copy the page into `docs/` and `git push`; GitHub Pages serves it.
+
+### Migrating an existing database
+
+`run.py migrate` is a **lossless, idempotent** one-shot that backfills the `queue`
+table from an existing `reels.db` — it reads each reel's populated columns
+(`caption`, `transcript`, `categories`, `tags`) and existing `media/*.mp4` files,
+and seeds the matching terminal queue markers (`done`/`skipped`). It only ever does
+`INSERT OR IGNORE` into `queue`; it **never mutates the `reels` table**, so no
+content is lost and no work is reprocessed. Running it twice inserts nothing the
+second time.
 
 ## Database schema
 
@@ -74,10 +130,15 @@ parsing the raw JSON. Shared reels show up as DM items of type `xma_clip` /
 | `source` | where it came from (dm / thread) |
 | `shared_by` | username who shared it |
 | `caption` | text caption (after enrich) |
+| `transcript` | local-ASR audio transcript (plain text; `''` = silent/music-only, `NULL` = not yet done) |
 | `thumbnail_url` | Instagram CDN image (expires after a few weeks) |
 | `taken_at` | original post time |
 | `categories` | JSON array, `NULL` until categorized |
+| `tags` | JSON array of free-form tags, `NULL` until generated |
 | `created_at` | row insert time |
+
+A separate `queue(pk, stage, status, attempts, error, updated_at)` table tracks
+each reel's progress through every pipeline stage (see [The queue](#the-queue)).
 
 ## Usage
 
@@ -88,20 +149,31 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 # one-time: authenticate (writes ig_session.json)
 .venv/bin/python login.py
 
-# full pipeline: scrape → enrich → categorize → build
+# full pipeline: scrape → enrich → download → transcribe → categorize → tags → build
 .venv/bin/python run.py all
 
-# or run a single stage
+# one-time, on an existing DB: seed the queue from already-populated columns
+.venv/bin/python run.py migrate
+
+# or run a single stage (each drains its slice of the queue)
 .venv/bin/python run.py scrape
 .venv/bin/python run.py thread --thread-id <id> --max 300
 .venv/bin/python run.py enrich
+.venv/bin/python run.py download
+.venv/bin/python run.py transcribe
 .venv/bin/python run.py categorize
+.venv/bin/python run.py tags
+.venv/bin/python run.py status        # per-stage queue counts
 .venv/bin/python run.py build
+
+# run the tests (no IG / ollama / whisper needed)
+PYTHONPATH=. .venv/bin/python -m unittest discover -s tests
 ```
 
 Database path defaults to `reels.db`; override with `REELS_DB=/path/to.db`.
 Categorizer is configurable via `REELS_CATEGORIZER` (`ollama`/`stub`), `OLLAMA_HOST`,
-`OLLAMA_MODEL`.
+`OLLAMA_MODEL`. Whisper is configurable via `REELS_WHISPER_MODEL` /
+`REELS_WHISPER_CLI`.
 
 ## Publishing updates
 
@@ -118,15 +190,50 @@ Re-running `enrich` + `build` periodically also refreshes thumbnails, which expi
 ## Secrets
 
 These are git-ignored and must **never** be committed:
-`ig_session.json`, `sessionid.txt`, `reels.db`, `*.db`, `.venv/`.
+`ig_session.json`, `sessionid.txt`, `reels.db`, `*.db`, `media/`, `*.mp4`, `*.wav`,
+`site/`, `.venv/`.
 
 The published repo is public, so only non-sensitive output (`docs/index.html` +
 source code) is ever pushed. The URL is randomized rather than secret-protected —
 GitHub Pages free tier can't gate access, so obscurity is the privacy layer.
 
+## Model roadmap (local enrichment)
+
+The understanding of each reel is built up from several **local** models, each
+adding a signal the next stage can use. Everything runs on-device — no cloud
+inference, no content leaves the machine.
+
+| Layer | Model | What it adds | Status |
+|-------|-------|--------------|--------|
+| **ASR** (audio → text) | whisper `large-v3-q5` via `whisper-cli` | spoken words, on-audio context | ✅ shipped (transcribe stage) |
+| **LLM** (text → labels) | `llama3.2` via ollama | categories + free-form tags from caption+transcript | ✅ shipped (categorize/tags) |
+| **VLM** (frames → text) | `moondream` via ollama (evaluating `llava` / `qwen2.5-vl`) | *visual* understanding — setting, people, actions, objects, **on-screen text** the audio never mentions | 🔬 in evaluation (A/B prototype) |
+| **OCR** (frames → text) | (folded into the VLM prompt for now) | burned-in captions / overlay text | 🔜 planned |
+
+### Why a VLM, and how it slots in without disturbing anything
+
+ASR only hears the audio; a huge fraction of reels are silent or music-only, and
+much of the meaning lives *on screen* (recipe text, place names, product shots).
+A vision-language model reads sampled keyframes and emits a short description,
+giving `categorize`/`tags` a third input alongside caption and transcript.
+
+It's designed as a purely **additive** stage — a twin of `transcribe`:
+
+- a new `vision` stage, `depends_on="download"` (reuses the already-downloaded
+  mp4), `ig_paced=False` (fully local), filling a new nullable `visual` column;
+- `categorize`/`tags` consume `caption + transcript + visual` **NULL-safely**, so
+  reels without a visual blob behave exactly as today;
+- no existing stage, column, or queue row changes — old reels keep working, and
+  the new stage backfills lazily.
+
+A standalone A/B prototype (`vlm_ab.py`) samples 3 keyframes per reel, runs
+moondream on each, and re-runs the *unchanged* categorize/tags twice
+(caption+transcript vs. +visual) to measure exactly what the visual signal adds
+before it's wired into the pipeline.
+
 ## Known limitations
 
 - Private or deleted reels won't load in the inline embed player.
 - CDN thumbnails expire after ~weeks — re-enrich to refresh.
-- ~23% of reels land in `other` (emoji-only / non-descriptive captions). On-screen
-  text OCR would shrink that bucket; not yet implemented.
+- ~23% of reels land in `other` (emoji-only / non-descriptive captions). The VLM /
+  on-screen-text layer above is the planned fix for this bucket.
