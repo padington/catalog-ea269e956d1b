@@ -31,7 +31,7 @@ class VisionStageWiringTests(unittest.TestCase):
         st = pipeline.stages()
         self.assertIn("vision", st)
         v = st["vision"]
-        self.assertEqual(v.depends_on, "download")
+        self.assertEqual(v.depends_on, ["download"])
         self.assertEqual(v.output_col, "visual")
         self.assertFalse(v.ig_paced)
         # vision sits right after transcribe, before categorize/tags.

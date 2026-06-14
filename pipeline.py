@@ -4,7 +4,8 @@ The old pipeline discovered work implicitly ("rows where my output column IS
 NULL"). This module replaces that with an EXPLICIT per-stage `queue` table
 (see db.py) plus one generic `drain()` loop that every stage shares.
 
-A `Stage` declares: its name, the stage it `depends_on`, whether it is
+A `Stage` declares: its name, the stages it `depends_on` (a list of parent
+stage names; `[]` for a root stage), whether it is
 `ig_paced` (touches Instagram, so jittered sleeps + abort-on-throttle apply),
 the reels column it fills (`output_col`, or None for download whose only marker
 is the queue 'done' status), and the `process`/`write` callables. The DAG lives
@@ -94,7 +95,7 @@ class ThrottleError(Exception):
 @dataclass
 class Stage:
     name: str
-    depends_on: Optional[str]
+    depends_on: list             # parent stage names; [] for a root stage
     ig_paced: bool
     output_col: Optional[str]      # reels column this stage fills, or None
     process: Callable              # (item: dict, ctx) -> result
@@ -163,21 +164,23 @@ def _build_stages():
     import vision
 
     stages = [
-        Stage("enrich", None, True, "caption",
+        Stage("enrich", [], True, "caption",
               enrich.process, _write_enrich,
               # Re-enrich NULL captions AND DM placeholders (mirrors the old
               # enrich.needs_enrichment). Fixed constant, parameter-free.
               ready_predicate="(r.caption IS NULL OR r.caption LIKE 'Reel by @%')"),
-        Stage("download", "enrich", True, None,
+        Stage("download", ["enrich"], True, None,
               download.download_process, _write_download),
-        Stage("transcribe", "download", False, "transcript",
+        Stage("transcribe", ["download"], False, "transcript",
               transcribe.transcribe_process, _write_transcript),
         # vision runs in parallel with transcribe (both depend on download).
-        Stage("vision", "download", False, "visual",
+        Stage("vision", ["download"], False, "visual",
               vision.process, _write_vision),
-        Stage("categorize", "transcribe", False, "categories",
+        # categorize/tags wait for BOTH transcribe AND vision so they see the
+        # visual signal, not just the transcript.
+        Stage("categorize", ["transcribe", "vision"], False, "categories",
               categorize.process, _write_categories),
-        Stage("tags", "transcribe", False, "tags",
+        Stage("tags", ["transcribe", "vision"], False, "tags",
               tags.tags_process, _write_tags),
     ]
     return OrderedDict((s.name, s) for s in stages)
@@ -227,9 +230,10 @@ STAGES = _LazyStages()
 def enqueue_ready(conn, stage_name):
     """Insert 'pending' queue rows for every reel ready to run `stage_name`.
 
-    A reel is ready when (a) its depends_on stage is 'done'/'skipped' in the
-    queue (or depends_on is None), AND (b) it is not already present in the
-    queue for this stage, AND (c) it still needs this stage's output (output_col
+    A reel is ready when (a) ALL its parent stages are 'done'/'skipped' in the
+    queue (a root stage with no parents is always satisfied), AND (b) it is not
+    already present in the queue for this stage, AND (c) it still needs this
+    stage's output (output_col
     IS NULL; for download — output_col None — readiness is just dependency +
     not-yet-queued, and download_process no-ops if the mp4 already exists).
     """
@@ -244,13 +248,14 @@ def enqueue_ready(conn, stage_name):
     )
     params.append(stage_name)
 
-    # (a) dependency satisfied
-    if stage.depends_on is not None:
+    # (a) dependency satisfied — ALL parents must be done/skipped. A root stage
+    # (empty list) adds no clause and is always ready on dependency grounds.
+    for parent in (stage.depends_on or []):
         wheres.append(
             "r.pk IN (SELECT pk FROM queue WHERE stage = ? "
             "AND status IN ('done', 'skipped'))"
         )
-        params.append(stage.depends_on)
+        params.append(parent)
 
     # (c) still needs this stage's output. A stage may override the default
     # `r.{output_col} IS NULL` clause with a ready_predicate (a fixed,

@@ -27,12 +27,12 @@ class WiringTests(unittest.TestCase):
             ["enrich", "download", "transcribe", "vision", "categorize",
              "tags"],
         )
-        self.assertIsNone(st["enrich"].depends_on)
-        self.assertEqual(st["download"].depends_on, "enrich")
-        self.assertEqual(st["transcribe"].depends_on, "download")
-        self.assertEqual(st["vision"].depends_on, "download")
-        self.assertEqual(st["categorize"].depends_on, "transcribe")
-        self.assertEqual(st["tags"].depends_on, "transcribe")
+        self.assertEqual(st["enrich"].depends_on, [])
+        self.assertEqual(st["download"].depends_on, ["enrich"])
+        self.assertEqual(st["transcribe"].depends_on, ["download"])
+        self.assertEqual(st["vision"].depends_on, ["download"])
+        self.assertEqual(st["categorize"].depends_on, ["transcribe", "vision"])
+        self.assertEqual(st["tags"].depends_on, ["transcribe", "vision"])
         self.assertTrue(st["enrich"].ig_paced)
         self.assertTrue(st["download"].ig_paced)
         self.assertFalse(st["transcribe"].ig_paced)
@@ -44,8 +44,8 @@ class WiringTests(unittest.TestCase):
         self.assertEqual(st["vision"].output_col, "visual")
         # every depends_on names a real stage
         for s in st.values():
-            if s.depends_on is not None:
-                self.assertIn(s.depends_on, st)
+            for parent in s.depends_on:
+                self.assertIn(parent, st)
 
     def test_enqueue_ready_real_registry_no_network(self):
         conn = dbm.connect(":memory:")

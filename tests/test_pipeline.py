@@ -38,7 +38,7 @@ class StubCtx:
         raise AssertionError("stub stages must not touch the IG client")
 
 
-def _stub_stage(name, process, depends_on=None, ig_paced=False,
+def _stub_stage(name, process, depends_on=(), ig_paced=False,
                 output_col="caption"):
     def write(conn, pk, result):
         dbm.update_reel(conn, pk, {"caption": result})
@@ -104,7 +104,7 @@ class DriverTests(unittest.TestCase):
         conn.commit()
         stages = {
             "a": _stub_stage("a", lambda i, c: "A", output_col="caption"),
-            "b": _stub_stage("b", lambda i, c: "B", depends_on="a",
+            "b": _stub_stage("b", lambda i, c: "B", depends_on=["a"],
                              output_col="transcript"),
         }
         saved = _install(stages)
