@@ -3,6 +3,7 @@
     python reels-catalog/run.py scrape [--limit N] [--delay S] [--source ...]
     python reels-catalog/run.py enrich [--delay S] [--limit N]
     python reels-catalog/run.py categorize
+    python reels-catalog/run.py tags
     python reels-catalog/run.py build
     python reels-catalog/run.py all
 """
@@ -39,6 +40,12 @@ def cmd_categorize(args):
     categorize.run(db_path=DB)
 
 
+def cmd_tags(args):
+    import categorize
+
+    categorize.run_tags(db_path=DB)
+
+
 def cmd_build(args):
     import build_site
 
@@ -49,6 +56,7 @@ def cmd_all(args):
     cmd_scrape(args)
     cmd_enrich(args)
     cmd_categorize(args)
+    cmd_tags(args)
     cmd_build(args)
 
 
@@ -72,11 +80,13 @@ def main(argv=None):
     tp.add_argument("--delay", type=float, default=1.0)
 
     sub.add_parser("categorize")
+    sub.add_parser("tags")
     sub.add_parser("build")
 
     args = p.parse_args(argv)
     {"scrape": cmd_scrape, "thread": cmd_thread, "enrich": cmd_enrich,
-     "categorize": cmd_categorize, "build": cmd_build, "all": cmd_all}[args.cmd](args)
+     "categorize": cmd_categorize, "tags": cmd_tags,
+     "build": cmd_build, "all": cmd_all}[args.cmd](args)
 
 
 if __name__ == "__main__":

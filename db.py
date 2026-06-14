@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS reels (
     thumbnail_url TEXT,
     taken_at      INTEGER,
     categories    TEXT,
+    tags          TEXT,
     created_at    INTEGER
 )
 """
@@ -26,6 +27,10 @@ def connect(path="reels.db"):
 
 def init_db(conn):
     conn.execute(SCHEMA)
+    # Migrate older DBs that predate the free-form `tags` column.
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(reels)")}
+    if "tags" not in cols:
+        conn.execute("ALTER TABLE reels ADD COLUMN tags TEXT")
     conn.commit()
 
 
@@ -88,12 +93,32 @@ def set_categories(conn, pk, categories):
     conn.commit()
 
 
+def set_tags(conn, pk, tags):
+    conn.execute(
+        "UPDATE reels SET tags = ? WHERE pk = ?",
+        (json.dumps(tags), pk),
+    )
+    conn.commit()
+
+
+def iter_untagged_with_caption(conn):
+    # Reels that still need fine-grained tags AND have a real caption to work
+    # from (the `Reel by @handle` placeholder yields nothing useful).
+    cur = conn.execute(
+        "SELECT * FROM reels WHERE tags IS NULL "
+        "AND caption IS NOT NULL AND caption NOT LIKE 'Reel by @%'"
+    )
+    for row in cur:
+        yield dict(row)
+
+
 def all_reels(conn):
     cur = conn.execute("SELECT * FROM reels ORDER BY taken_at DESC")
     out = []
     for row in cur:
         d = dict(row)
         d["categories"] = json.loads(d["categories"]) if d["categories"] else []
+        d["tags"] = json.loads(d["tags"]) if d.get("tags") else []
         out.append(d)
     return out
 
