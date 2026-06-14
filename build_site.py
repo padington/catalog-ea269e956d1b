@@ -70,7 +70,7 @@ TEMPLATE = """<!DOCTYPE html>
   .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
     width: 100%; height: 100%; background: rgba(0,0,0,.88); z-index: 50;
     align-items: center; justify-content: center; }
-  .modal.open { display: flex; }
+  .modal.open { display: flex; flex-direction: column; }
   .modal-inner { position: relative; width: min(96vw, 640px); aspect-ratio: 100/128;
     max-height: 96vh; overflow: hidden; border-radius: 10px; background: #000; }
   .modal-inner #modal-body { width: 100%; height: 100%; overflow: hidden; }
@@ -79,6 +79,10 @@ TEMPLATE = """<!DOCTYPE html>
   .modal-close { position: absolute; top: -2.6rem; right: 0; width: 2.2rem; height: 2.2rem;
     border: 0; border-radius: 999px; background: #fff; color: #222; font-size: 1.3rem;
     line-height: 1; cursor: pointer; }
+  .modal-tags { width: min(96vw, 640px); margin-top: .5rem; text-align: center; line-height: 1.8; }
+  .modal-tags .t { display: inline-block; font-size: .72rem; color: #eee; background: rgba(255,255,255,.16);
+    border-radius: 999px; padding: .1rem .55rem; margin: 2px; cursor: pointer; }
+  .modal-tags .t:hover { background: rgba(255,255,255,.3); }
 </style>
 </head>
 <body>
@@ -130,6 +134,7 @@ TEMPLATE = """<!DOCTYPE html>
     <button class="modal-close" onclick="closeModal()">&times;</button>
     <div id="modal-body"></div>
   </div>
+  <div id="modal-tags" class="modal-tags" onclick="event.stopPropagation()"></div>
 </div>
 
 <script>
@@ -207,13 +212,26 @@ function sortReels(mode, btn) {
 function openModal(code) {
   if (!code) return;
   document.getElementById('modal-body').innerHTML =
-    '<iframe src="https://www.instagram.com/p/' + code + '/embed" scrolling="no"></iframe>';
+    '<iframe src="https://www.instagram.com/reel/' + code + '/embed/" scrolling="no"' +
+    ' allow="autoplay; encrypted-media; clipboard-write; picture-in-picture" allowfullscreen></iframe>';
+  var box = document.getElementById('modal-tags');
+  box.innerHTML = '';
+  var card = document.querySelector('.card[data-code="' + code + '"]');
+  var tags = card ? (card.dataset.tags || '').split(' ').filter(Boolean) : [];
+  tags.forEach(function (t) {
+    var chip = document.createElement('span');
+    chip.className = 't';
+    chip.textContent = t;
+    chip.onclick = function () { closeModal(); searchTag(t); };
+    box.appendChild(chip);
+  });
   document.getElementById('modal').classList.add('open');
 }
 function closeModal(e) {
   if (e && e.type === 'click' && e.target.id !== 'modal') return;
   document.getElementById('modal').classList.remove('open');
   document.getElementById('modal-body').innerHTML = '';
+  document.getElementById('modal-tags').innerHTML = '';
 }
 document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
 
