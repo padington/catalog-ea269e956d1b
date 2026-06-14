@@ -1,7 +1,6 @@
 # Reels Catalogue
 
-A hands-off pipeline that scrapes the Instagram reels you and your wife share in
-DMs, figures out what each one is about, and publishes a browsable, category-filtered
+A hands-off pipeline that scrapes the Instagram reels figures out what each one is about, and publishes a browsable, category-filtered
 catalogue to GitHub Pages — with click-to-play Instagram embeds.
 
 ## Architecture
