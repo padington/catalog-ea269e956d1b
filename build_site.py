@@ -70,16 +70,17 @@ TEMPLATE = """<!DOCTYPE html>
   .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
     width: 100%; height: 100%; background: rgba(0,0,0,.88); z-index: 50;
     align-items: center; justify-content: center; }
-  .modal.open { display: flex; flex-direction: column; }
+  .modal.open { display: flex; flex-direction: column; padding: 3rem 0 1rem; box-sizing: border-box; }
   .modal-inner { position: relative; width: min(96vw, 640px); aspect-ratio: 100/128;
-    max-height: 96vh; overflow: hidden; border-radius: 10px; background: #000; }
+    max-height: 74vh; overflow: hidden; border-radius: 10px; background: #000; flex: 0 0 auto; }
   .modal-inner #modal-body { width: 100%; height: 100%; overflow: hidden; }
   /* Oversize the iframe and clip the bottom so Instagram's likes/comments footer is cropped off. */
   .modal-inner iframe { width: 100%; height: calc(100% + 180px); border: 0; background: #000; display: block; }
   .modal-close { position: absolute; top: -2.6rem; right: 0; width: 2.2rem; height: 2.2rem;
     border: 0; border-radius: 999px; background: #fff; color: #222; font-size: 1.3rem;
     line-height: 1; cursor: pointer; }
-  .modal-tags { width: min(96vw, 640px); margin-top: .5rem; text-align: center; line-height: 1.8; }
+  .modal-tags { width: min(96vw, 640px); margin-top: .6rem; text-align: center; line-height: 1.8;
+    flex: 0 1 auto; overflow-y: auto; }
   .modal-tags .t { display: inline-block; font-size: .72rem; color: #eee; background: rgba(255,255,255,.16);
     border-radius: 999px; padding: .1rem .55rem; margin: 2px; cursor: pointer; }
   .modal-tags .t:hover { background: rgba(255,255,255,.3); }
