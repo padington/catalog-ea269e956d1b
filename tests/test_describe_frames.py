@@ -53,8 +53,8 @@ class DescribeFramesWiringTests(unittest.TestCase):
         names = list(st)
         self.assertEqual(
             names,
-            ["enrich", "download", "transcribe", "sample_frames",
-             "describe_frames", "categorize", "tags"],
+            ["enrich", "download", "extract_audio", "transcribe",
+             "sample_frames", "describe_frames", "categorize", "tags"],
         )
         self.assertLess(names.index("sample_frames"),
                         names.index("describe_frames"))

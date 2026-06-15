@@ -135,8 +135,9 @@ def _write_enrich(conn, pk, result):
 
 
 def _write_marker(conn, pk, result):
-    # Shared no-op for output_col=None stages (download, sample_frames): the
-    # queue 'done' status IS the marker; nothing to persist to reels.
+    # Shared no-op for output_col=None stages (download, extract_audio,
+    # sample_frames): the queue 'done' status IS the marker; nothing to persist
+    # to reels.
     pass
 
 
@@ -161,6 +162,7 @@ def _build_stages():
     import categorize
     import describe_frames
     import download
+    import extract_audio
     import sample_frames
     import tags
     import transcribe
@@ -173,7 +175,12 @@ def _build_stages():
               ready_predicate="(r.caption IS NULL OR r.caption LIKE 'Reel by @%')"),
         Stage("download", ["enrich"], True, None,
               download.download_process, _write_marker),
-        Stage("transcribe", ["download"], False, "transcript",
+        # extract_audio runs the cheap ffmpeg mp4->wav extraction and persists
+        # the wav on disk (output_col=None, the 'done' status is its marker).
+        Stage("extract_audio", ["download"], False, None,
+              extract_audio.extract_audio_process, _write_marker),
+        # transcribe consumes the persisted wav and fills `transcript`.
+        Stage("transcribe", ["extract_audio"], False, "transcript",
               transcribe.transcribe_process, _write_transcript),
         # sample_frames runs in parallel with transcribe (both depend on
         # download); it persists frame jpgs + a manifest (output_col=None, the

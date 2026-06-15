@@ -24,3 +24,8 @@ def media_path(pk):
 def frames_dir(pk):
     """Directory holding sampled frame jpgs + manifest.json for a reel (does not create it)."""
     return os.path.join(MEDIA_DIR, f"{pk}.frames")
+
+
+def wav_path(pk):
+    """Path to the extracted 16 kHz mono wav for a reel (does not check existence)."""
+    return os.path.join(MEDIA_DIR, f"{pk}.wav")

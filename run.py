@@ -3,6 +3,7 @@
     python reels-catalog/run.py scrape [--limit N] [--delay S] [--source ...]
     python reels-catalog/run.py enrich [--delay S] [--limit N]
     python reels-catalog/run.py download [--limit N] [--delay S]
+    python reels-catalog/run.py extract_audio [--limit N] [--delay S]
     python reels-catalog/run.py transcribe [--limit N] [--delay S]
     python reels-catalog/run.py sample_frames [--limit N] [--delay S]
     python reels-catalog/run.py describe_frames [--limit N] [--delay S]
@@ -14,8 +15,8 @@
     python reels-catalog/run.py build
     python reels-catalog/run.py all
 
-The per-reel stages (enrich/download/transcribe/sample_frames/describe_frames/
-categorize/tags) are now driven
+The per-reel stages (enrich/download/extract_audio/transcribe/sample_frames/
+describe_frames/categorize/tags) are now driven
 by the explicit queue + generic driver in pipeline.py; each subcommand just
 drains its stage.
 """
@@ -58,6 +59,11 @@ def cmd_enrich(args):
 def cmd_download(args):
     _drain("download", limit=getattr(args, "limit", None),
            delay=getattr(args, "delay", 6.0))
+
+
+def cmd_extract_audio(args):
+    _drain("extract_audio", limit=getattr(args, "limit", None),
+           delay=getattr(args, "delay", 0.0))
 
 
 def cmd_transcribe(args):
@@ -134,8 +140,8 @@ def cmd_migrate(args):
         for (stage, status), n in sorted(summary.items()):
             print(f"  {stage:<12} {status:<8} {n}")
 
-    for stage in ("enrich", "download", "transcribe", "sample_frames",
-                  "describe_frames", "categorize", "tags"):
+    for stage in ("enrich", "download", "extract_audio", "transcribe",
+                  "sample_frames", "describe_frames", "categorize", "tags"):
         pipeline.enqueue_ready(conn, stage)
 
     print()
@@ -150,8 +156,8 @@ def cmd_build(args):
 
 def cmd_all(args):
     cmd_scrape(args)
-    for stage in ("enrich", "download", "transcribe", "sample_frames",
-                  "describe_frames", "categorize", "tags"):
+    for stage in ("enrich", "download", "extract_audio", "transcribe",
+                  "sample_frames", "describe_frames", "categorize", "tags"):
         _drain(stage,
                delay=getattr(args, "delay", 2.0) if stage in ("enrich", "download")
                else 0.0)
@@ -175,6 +181,10 @@ def main(argv=None):
     dp = sub.add_parser("download")
     dp.add_argument("--limit", type=int, default=None)
     dp.add_argument("--delay", type=float, default=6.0)
+
+    eap = sub.add_parser("extract_audio")
+    eap.add_argument("--limit", type=int, default=None)
+    eap.add_argument("--delay", type=float, default=0.0)
 
     xp = sub.add_parser("transcribe")
     xp.add_argument("--limit", type=int, default=None)
@@ -202,7 +212,8 @@ def main(argv=None):
 
     args = p.parse_args(argv)
     {"scrape": cmd_scrape, "thread": cmd_thread, "enrich": cmd_enrich,
-     "download": cmd_download, "transcribe": cmd_transcribe,
+     "download": cmd_download, "extract_audio": cmd_extract_audio,
+     "transcribe": cmd_transcribe,
      "sample_frames": cmd_sample_frames,
      "describe_frames": cmd_describe_frames,
      "categorize": cmd_categorize, "tags": cmd_tags,

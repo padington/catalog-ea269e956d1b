@@ -228,6 +228,7 @@ def backfill_queue(conn):
       enrich:     caption present and NOT a 'Reel by @' placeholder -> 'done'
       download:   transcript non-empty OR <pk>.mp4 on disk non-empty -> 'done';
                   transcript == '' (no-video sentinel)               -> 'skipped'
+      extract_audio: transcript non-empty -> 'done'; transcript == '' -> 'skipped'
       transcribe: transcript non-empty -> 'done'; transcript == '' -> 'skipped'
       categorize: categories NOT NULL -> 'done'
       tags:       tags NOT NULL -> 'done'
@@ -268,8 +269,10 @@ def backfill_queue(conn):
             pending.append((pk, "download", "skipped"))
 
         if has_transcript:
+            pending.append((pk, "extract_audio", "done"))
             pending.append((pk, "transcribe", "done"))
         elif transcript == "":
+            pending.append((pk, "extract_audio", "skipped"))
             pending.append((pk, "transcribe", "skipped"))
 
         # A non-NULL visual blob ("" included) implies frames were both sampled

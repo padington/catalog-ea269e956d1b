@@ -1,13 +1,18 @@
 """Local speech-to-text (ASR) for reels — pure whisper, no network.
 
-The CPU-bound half of the old transcribe module (the network-bound download
-half now lives in download.py). This stage extracts a 16 kHz mono wav with
-ffmpeg and runs ``whisper-cli`` against a local GGML Whisper model. The plain
-text is stored in the ``transcript`` column.
+The expensive, CPU-bound half of the old transcribe module: it runs
+``whisper-cli`` against a local GGML Whisper model over the 16 kHz mono wav that
+the extract_audio stage already wrote to disk. The plain text is stored in the
+``transcript`` column. (The cheap ffmpeg mp4->wav extraction now lives in
+extract_audio.py; the network-bound download half lives in download.py.)
 
 Runs are resumable via the queue: an empty-string transcript is a valid
 terminal so a reel is never retried forever. The legacy helper transcribe_wav
 is kept intact for the standalone benchmark.
+
+The wav must exist; if missing, process() raises (extract_audio not done yet)
+so the item is marked 'failed' and retried once extract_audio catches up. The
+wav is NOT deleted here — its lifecycle is the `clean` command.
 
 Env vars:
 - REELS_DB: sqlite path (default "reels.db").
@@ -18,13 +23,11 @@ Env vars:
 import os
 import shutil
 import subprocess
-import tempfile
 
 import db as dbm
-from ffmpeg import extract_wav
 # MEDIA_DIR is re-exported here so db.backfill_queue (which reads
 # transcribe.MEDIA_DIR) and tests that monkeypatch it keep working unchanged.
-from storage import MEDIA_DIR, media_path  # noqa: F401
+from storage import MEDIA_DIR, wav_path  # noqa: F401
 
 # Local GGML Whisper model shipped by Handy.app; overridable via env.
 WHISPER_MODEL = os.environ.get(
@@ -60,24 +63,19 @@ def transcribe_wav(wav_path):
 
 
 def transcribe_process(item, ctx):
-    """Local whisper stage (NO network): transcribe the already-downloaded mp4.
+    """Local whisper stage (NO network): transcribe the already-extracted wav.
 
-    Requires media/<pk>.mp4 on disk (produced by the download stage). Returns
-    the transcript text (possibly ""). Raises if the mp4 is missing so the item
-    is marked 'failed' and retried once download catches up.
+    Requires the 16 kHz mono wav on disk (produced by the extract_audio stage).
+    Returns the transcript text (possibly ""). Raises if the wav is missing so
+    the item is marked 'failed' and retried once extract_audio catches up. The
+    wav is NOT deleted here (the `clean` command owns its lifecycle).
     """
     pk = item["pk"]
-    mp4_path = media_path(pk)
-    if not (os.path.exists(mp4_path) and os.path.getsize(mp4_path) > 0):
-        raise FileNotFoundError(f"no media for {pk}; download stage not done yet")
-    fd, wav_path = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-    try:
-        extract_wav(mp4_path, wav_path)
-        return transcribe_wav(wav_path)
-    finally:
-        if os.path.exists(wav_path):
-            os.remove(wav_path)
+    wav = wav_path(pk)
+    if not (os.path.exists(wav) and os.path.getsize(wav) > 0):
+        raise FileNotFoundError(
+            f"no audio for {pk}; extract_audio stage not done yet")
+    return transcribe_wav(wav)
 
 
 def run(db_path=None, delay=0.0, limit=None):

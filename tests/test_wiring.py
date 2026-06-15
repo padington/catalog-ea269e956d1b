@@ -24,12 +24,13 @@ class WiringTests(unittest.TestCase):
         st = pipeline.stages()
         self.assertEqual(
             list(st),
-            ["enrich", "download", "transcribe", "sample_frames",
-             "describe_frames", "categorize", "tags"],
+            ["enrich", "download", "extract_audio", "transcribe",
+             "sample_frames", "describe_frames", "categorize", "tags"],
         )
         self.assertEqual(st["enrich"].depends_on, [])
         self.assertEqual(st["download"].depends_on, ["enrich"])
-        self.assertEqual(st["transcribe"].depends_on, ["download"])
+        self.assertEqual(st["extract_audio"].depends_on, ["download"])
+        self.assertEqual(st["transcribe"].depends_on, ["extract_audio"])
         self.assertEqual(st["sample_frames"].depends_on, ["download"])
         self.assertEqual(st["describe_frames"].depends_on, ["sample_frames"])
         self.assertEqual(st["categorize"].depends_on,
@@ -38,12 +39,14 @@ class WiringTests(unittest.TestCase):
                          ["transcribe", "describe_frames"])
         self.assertTrue(st["enrich"].ig_paced)
         self.assertTrue(st["download"].ig_paced)
+        self.assertFalse(st["extract_audio"].ig_paced)
         self.assertFalse(st["transcribe"].ig_paced)
         self.assertFalse(st["sample_frames"].ig_paced)
         self.assertFalse(st["describe_frames"].ig_paced)
         self.assertFalse(st["categorize"].ig_paced)
         self.assertFalse(st["tags"].ig_paced)
         self.assertIsNone(st["download"].output_col)
+        self.assertIsNone(st["extract_audio"].output_col)
         self.assertEqual(st["transcribe"].output_col, "transcript")
         self.assertIsNone(st["sample_frames"].output_col)
         self.assertEqual(st["describe_frames"].output_col, "visual")
