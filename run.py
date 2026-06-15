@@ -4,7 +4,8 @@
     python reels-catalog/run.py enrich [--delay S] [--limit N]
     python reels-catalog/run.py download [--limit N] [--delay S]
     python reels-catalog/run.py transcribe [--limit N] [--delay S]
-    python reels-catalog/run.py vision [--limit N] [--delay S]
+    python reels-catalog/run.py sample_frames [--limit N] [--delay S]
+    python reels-catalog/run.py describe_frames [--limit N] [--delay S]
     python reels-catalog/run.py categorize
     python reels-catalog/run.py tags
     python reels-catalog/run.py status
@@ -13,7 +14,8 @@
     python reels-catalog/run.py build
     python reels-catalog/run.py all
 
-The per-reel stages (enrich/download/transcribe/vision/categorize/tags) are now driven
+The per-reel stages (enrich/download/transcribe/sample_frames/describe_frames/
+categorize/tags) are now driven
 by the explicit queue + generic driver in pipeline.py; each subcommand just
 drains its stage.
 """
@@ -63,8 +65,13 @@ def cmd_transcribe(args):
            delay=getattr(args, "delay", 0.0))
 
 
-def cmd_vision(args):
-    _drain("vision", limit=getattr(args, "limit", None),
+def cmd_sample_frames(args):
+    _drain("sample_frames", limit=getattr(args, "limit", None),
+           delay=getattr(args, "delay", 0.0))
+
+
+def cmd_describe_frames(args):
+    _drain("describe_frames", limit=getattr(args, "limit", None),
            delay=getattr(args, "delay", 0.0))
 
 
@@ -127,8 +134,8 @@ def cmd_migrate(args):
         for (stage, status), n in sorted(summary.items()):
             print(f"  {stage:<12} {status:<8} {n}")
 
-    for stage in ("enrich", "download", "transcribe", "vision", "categorize",
-                  "tags"):
+    for stage in ("enrich", "download", "transcribe", "sample_frames",
+                  "describe_frames", "categorize", "tags"):
         pipeline.enqueue_ready(conn, stage)
 
     print()
@@ -143,8 +150,8 @@ def cmd_build(args):
 
 def cmd_all(args):
     cmd_scrape(args)
-    for stage in ("enrich", "download", "transcribe", "vision", "categorize",
-                  "tags"):
+    for stage in ("enrich", "download", "transcribe", "sample_frames",
+                  "describe_frames", "categorize", "tags"):
         _drain(stage,
                delay=getattr(args, "delay", 2.0) if stage in ("enrich", "download")
                else 0.0)
@@ -173,9 +180,13 @@ def main(argv=None):
     xp.add_argument("--limit", type=int, default=None)
     xp.add_argument("--delay", type=float, default=0.0)
 
-    vp = sub.add_parser("vision")
-    vp.add_argument("--limit", type=int, default=None)
-    vp.add_argument("--delay", type=float, default=0.0)
+    sfp = sub.add_parser("sample_frames")
+    sfp.add_argument("--limit", type=int, default=None)
+    sfp.add_argument("--delay", type=float, default=0.0)
+
+    dfp = sub.add_parser("describe_frames")
+    dfp.add_argument("--limit", type=int, default=None)
+    dfp.add_argument("--delay", type=float, default=0.0)
 
     tp = sub.add_parser("thread")
     tp.add_argument("--thread-id", required=True, dest="thread_id")
@@ -192,7 +203,9 @@ def main(argv=None):
     args = p.parse_args(argv)
     {"scrape": cmd_scrape, "thread": cmd_thread, "enrich": cmd_enrich,
      "download": cmd_download, "transcribe": cmd_transcribe,
-     "vision": cmd_vision, "categorize": cmd_categorize, "tags": cmd_tags,
+     "sample_frames": cmd_sample_frames,
+     "describe_frames": cmd_describe_frames,
+     "categorize": cmd_categorize, "tags": cmd_tags,
      "status": cmd_status, "stats": cmd_stats, "migrate": cmd_migrate,
      "build": cmd_build, "all": cmd_all}[args.cmd](args)
 

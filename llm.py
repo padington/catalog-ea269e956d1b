@@ -1,9 +1,9 @@
-"""Shared local-LLM (ollama) plumbing for the categorize/tags/vision stages.
+"""Shared local-LLM (ollama) plumbing for the categorize/tags/describe_frames stages.
 
 A dependency-free wrapper over ollama's HTTP API (stdlib only, no SDK):
   * _ollama_chat(system, user) — one /api/chat turn, returns message content
-  * generate(prompt, images, model) — one /api/generate call (used by vision's
-    VLM frame description)
+  * generate(prompt, images, model) — one /api/generate call (used by
+    describe_frames' VLM frame description)
   * signal_text(item) — join a reel's caption + transcript + visual into one
     text blob for the LLM stages
 
@@ -46,7 +46,7 @@ def _ollama_chat(system, user):
 def generate(prompt, images=None, model=None):
     """One /api/generate call against ollama; returns the raw response string.
 
-    Used by vision's VLM frame description: pass base64-encoded `images`.
+    Used by describe_frames' VLM frame description: pass base64-encoded `images`.
     """
     body_obj = {
         "model": model or OLLAMA_MODEL,

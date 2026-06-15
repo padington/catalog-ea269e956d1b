@@ -134,8 +134,9 @@ def _write_enrich(conn, pk, result):
     dbm.update_reel(conn, pk, result)
 
 
-def _write_download(conn, pk, result):
-    # The queue 'done' status IS the marker; nothing to persist to reels.
+def _write_marker(conn, pk, result):
+    # Shared no-op for output_col=None stages (download, sample_frames): the
+    # queue 'done' status IS the marker; nothing to persist to reels.
     pass
 
 
@@ -158,10 +159,11 @@ def _write_tags(conn, pk, result):
 def _build_stages():
     import enrich
     import categorize
+    import describe_frames
     import download
+    import sample_frames
     import tags
     import transcribe
-    import vision
 
     stages = [
         Stage("enrich", [], True, "caption",
@@ -170,17 +172,22 @@ def _build_stages():
               # enrich.needs_enrichment). Fixed constant, parameter-free.
               ready_predicate="(r.caption IS NULL OR r.caption LIKE 'Reel by @%')"),
         Stage("download", ["enrich"], True, None,
-              download.download_process, _write_download),
+              download.download_process, _write_marker),
         Stage("transcribe", ["download"], False, "transcript",
               transcribe.transcribe_process, _write_transcript),
-        # vision runs in parallel with transcribe (both depend on download).
-        Stage("vision", ["download"], False, "visual",
-              vision.process, _write_vision),
-        # categorize/tags wait for BOTH transcribe AND vision so they see the
-        # visual signal, not just the transcript.
-        Stage("categorize", ["transcribe", "vision"], False, "categories",
+        # sample_frames runs in parallel with transcribe (both depend on
+        # download); it persists frame jpgs + a manifest (output_col=None, the
+        # 'done' status is its marker).
+        Stage("sample_frames", ["download"], False, None,
+              sample_frames.sample_frames_process, _write_marker),
+        # describe_frames consumes the sampled frames and fills `visual`.
+        Stage("describe_frames", ["sample_frames"], False, "visual",
+              describe_frames.describe_frames_process, _write_vision),
+        # categorize/tags wait for BOTH transcribe AND describe_frames so they
+        # see the visual signal, not just the transcript.
+        Stage("categorize", ["transcribe", "describe_frames"], False, "categories",
               categorize.process, _write_categories),
-        Stage("tags", ["transcribe", "vision"], False, "tags",
+        Stage("tags", ["transcribe", "describe_frames"], False, "tags",
               tags.tags_process, _write_tags),
     ]
     return OrderedDict((s.name, s) for s in stages)

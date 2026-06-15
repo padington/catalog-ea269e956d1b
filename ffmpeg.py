@@ -7,10 +7,10 @@ share:
   * proportional_frames — 25/50/75% fallback when no scene cuts; failed grabs skip
   * extract_wav         — 16 kHz mono PCM wav for whisper.cpp
 
-scene_frames/proportional_frames were moved from vision.py; extract_wav from
-transcribe.py. scene_frames takes max_frames/threshold as parameters (defaults
-8 and 0.3) so vision can pass its own module-level MAX_FRAMES/SCENE_THRESHOLD
-and behavior stays identical.
+scene_frames/proportional_frames were moved out of the old vision stage;
+extract_wav from transcribe.py. scene_frames takes max_frames/threshold as
+parameters (defaults 8 and 0.3) so sample_frames can pass its own module-level
+MAX_FRAMES/SCENE_THRESHOLD and behavior stays identical.
 """
 
 import glob

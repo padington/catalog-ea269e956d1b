@@ -231,7 +231,7 @@ def backfill_queue(conn):
       transcribe: transcript non-empty -> 'done'; transcript == '' -> 'skipped'
       categorize: categories NOT NULL -> 'done'
       tags:       tags NOT NULL -> 'done'
-      vision:     visual NOT NULL -> 'done'
+      sample_frames/describe_frames: visual NOT NULL -> both 'done'
 
     Returns a summary dict {(stage, status): count} of rows actually inserted.
     """
@@ -272,9 +272,11 @@ def backfill_queue(conn):
         elif transcript == "":
             pending.append((pk, "transcribe", "skipped"))
 
-        # vision: a non-NULL visual blob ("" included) means vision is done.
+        # A non-NULL visual blob ("" included) implies frames were both sampled
+        # and described, so seed BOTH stages done.
         if visual is not None:
-            pending.append((pk, "vision", "done"))
+            pending.append((pk, "sample_frames", "done"))
+            pending.append((pk, "describe_frames", "done"))
 
         # categorize / tags: presence of the column value is the marker.
         if categories is not None:

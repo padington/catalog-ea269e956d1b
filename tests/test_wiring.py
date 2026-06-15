@@ -24,24 +24,29 @@ class WiringTests(unittest.TestCase):
         st = pipeline.stages()
         self.assertEqual(
             list(st),
-            ["enrich", "download", "transcribe", "vision", "categorize",
-             "tags"],
+            ["enrich", "download", "transcribe", "sample_frames",
+             "describe_frames", "categorize", "tags"],
         )
         self.assertEqual(st["enrich"].depends_on, [])
         self.assertEqual(st["download"].depends_on, ["enrich"])
         self.assertEqual(st["transcribe"].depends_on, ["download"])
-        self.assertEqual(st["vision"].depends_on, ["download"])
-        self.assertEqual(st["categorize"].depends_on, ["transcribe", "vision"])
-        self.assertEqual(st["tags"].depends_on, ["transcribe", "vision"])
+        self.assertEqual(st["sample_frames"].depends_on, ["download"])
+        self.assertEqual(st["describe_frames"].depends_on, ["sample_frames"])
+        self.assertEqual(st["categorize"].depends_on,
+                         ["transcribe", "describe_frames"])
+        self.assertEqual(st["tags"].depends_on,
+                         ["transcribe", "describe_frames"])
         self.assertTrue(st["enrich"].ig_paced)
         self.assertTrue(st["download"].ig_paced)
         self.assertFalse(st["transcribe"].ig_paced)
-        self.assertFalse(st["vision"].ig_paced)
+        self.assertFalse(st["sample_frames"].ig_paced)
+        self.assertFalse(st["describe_frames"].ig_paced)
         self.assertFalse(st["categorize"].ig_paced)
         self.assertFalse(st["tags"].ig_paced)
         self.assertIsNone(st["download"].output_col)
         self.assertEqual(st["transcribe"].output_col, "transcript")
-        self.assertEqual(st["vision"].output_col, "visual")
+        self.assertIsNone(st["sample_frames"].output_col)
+        self.assertEqual(st["describe_frames"].output_col, "visual")
         # every depends_on names a real stage
         for s in st.values():
             for parent in s.depends_on:

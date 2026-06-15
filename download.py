@@ -2,7 +2,7 @@
 
 The network-bound half of the old transcribe module: fetch the reel's media
 info and download the video to a cache dir. This is the ONLY Instagram call in
-the download/transcribe/vision stages.
+the download/transcribe/sample_frames/describe_frames stages.
 
 Runs are resumable via the queue: download failures are retried, and reels with
 no video (gone/private) return NO_VIDEO so the driver maps them to 'skipped' and
