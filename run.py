@@ -11,6 +11,7 @@
     python reels-catalog/run.py tags
     python reels-catalog/run.py status
     python reels-catalog/run.py stats
+    python reels-catalog/run.py clean
     python reels-catalog/run.py migrate
     python reels-catalog/run.py build
     python reels-catalog/run.py all
@@ -118,6 +119,20 @@ def cmd_stats(args):
               f"{r.get('seconds') or 0:>9.1f} {r.get('items_per_min') or 0:>10.1f}")
 
 
+def cmd_clean(args):
+    """Delete intermediate artifacts (wavs, frame dirs) whose consuming stage is
+    terminal. The mp4 is kept (source of truth + download idempotency)."""
+    import clean
+    import db as dbm
+
+    conn = dbm.connect(DB)
+    dbm.init_db(conn)
+    summary = clean.clean_intermediates(conn)
+    mb = summary["bytes_freed"] / (1024 * 1024)
+    print(f"clean: removed {summary['wavs_removed']} wav(s), "
+          f"{summary['frames_removed']} frame dir(s), freed {mb:.1f} MB")
+
+
 def cmd_migrate(args):
     """One-time lossless migration for a DB populated under the OLD pipeline.
 
@@ -207,6 +222,7 @@ def main(argv=None):
     sub.add_parser("tags")
     sub.add_parser("status")
     sub.add_parser("stats")
+    sub.add_parser("clean")
     sub.add_parser("migrate")
     sub.add_parser("build")
 
@@ -217,7 +233,8 @@ def main(argv=None):
      "sample_frames": cmd_sample_frames,
      "describe_frames": cmd_describe_frames,
      "categorize": cmd_categorize, "tags": cmd_tags,
-     "status": cmd_status, "stats": cmd_stats, "migrate": cmd_migrate,
+     "status": cmd_status, "stats": cmd_stats, "clean": cmd_clean,
+     "migrate": cmd_migrate,
      "build": cmd_build, "all": cmd_all}[args.cmd](args)
 
 

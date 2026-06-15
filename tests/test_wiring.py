@@ -50,6 +50,16 @@ class WiringTests(unittest.TestCase):
         self.assertEqual(st["transcribe"].output_col, "transcript")
         self.assertIsNone(st["sample_frames"].output_col)
         self.assertEqual(st["describe_frames"].output_col, "visual")
+        # cascade_skip: the four media-consuming stages skip when a parent is
+        # skipped; enrich/download and caption-only categorize/tags do NOT.
+        self.assertTrue(st["extract_audio"].cascade_skip)
+        self.assertTrue(st["transcribe"].cascade_skip)
+        self.assertTrue(st["sample_frames"].cascade_skip)
+        self.assertTrue(st["describe_frames"].cascade_skip)
+        self.assertFalse(st["enrich"].cascade_skip)
+        self.assertFalse(st["download"].cascade_skip)
+        self.assertFalse(st["categorize"].cascade_skip)
+        self.assertFalse(st["tags"].cascade_skip)
         # every depends_on names a real stage
         for s in st.values():
             for parent in s.depends_on:

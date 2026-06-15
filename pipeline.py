@@ -106,6 +106,10 @@ class Stage:
     # be string-interpolated safely. enrich uses it to re-enrich placeholder
     # `Reel by @<handle>` captions, not just NULL ones.
     ready_predicate: Optional[str] = None
+    # True when this stage needs an upstream media artifact, so a 'skipped'
+    # parent means this reel's artifact will never exist — terminal-skip it
+    # instead of failing it forever.
+    cascade_skip: bool = False
 
 
 class Context:
@@ -178,18 +182,22 @@ def _build_stages():
         # extract_audio runs the cheap ffmpeg mp4->wav extraction and persists
         # the wav on disk (output_col=None, the 'done' status is its marker).
         Stage("extract_audio", ["download"], False, None,
-              extract_audio.extract_audio_process, _write_marker),
+              extract_audio.extract_audio_process, _write_marker,
+              cascade_skip=True),
         # transcribe consumes the persisted wav and fills `transcript`.
         Stage("transcribe", ["extract_audio"], False, "transcript",
-              transcribe.transcribe_process, _write_transcript),
+              transcribe.transcribe_process, _write_transcript,
+              cascade_skip=True),
         # sample_frames runs in parallel with transcribe (both depend on
         # download); it persists frame jpgs + a manifest (output_col=None, the
         # 'done' status is its marker).
         Stage("sample_frames", ["download"], False, None,
-              sample_frames.sample_frames_process, _write_marker),
+              sample_frames.sample_frames_process, _write_marker,
+              cascade_skip=True),
         # describe_frames consumes the sampled frames and fills `visual`.
         Stage("describe_frames", ["sample_frames"], False, "visual",
-              describe_frames.describe_frames_process, _write_vision),
+              describe_frames.describe_frames_process, _write_vision,
+              cascade_skip=True),
         # categorize/tags wait for BOTH transcribe AND describe_frames so they
         # see the visual signal, not just the transcript.
         Stage("categorize", ["transcribe", "describe_frames"], False, "categories",
@@ -250,8 +258,33 @@ def enqueue_ready(conn, stage_name):
     stage's output (output_col
     IS NULL; for download — output_col None — readiness is just dependency +
     not-yet-queued, and download_process no-ops if the mp4 already exists).
+
+    Skip-cascade: a `cascade_skip` stage needs an upstream MEDIA artifact, so a
+    'skipped' parent means this reel's artifact will never exist. Before the
+    pending insert, we terminal-'skip' any not-yet-queued reel that has ANY
+    parent 'skipped' (e.g. download skipped a no-video reel → extract_audio,
+    transcribe, sample_frames, describe_frames all skip in turn). categorize and
+    tags are cascade_skip=False on purpose: they fall through to 'pending' even
+    with skipped parents and run on caption alone.
     """
     stage = stages()[stage_name]
+
+    # Skip-cascade: insert a terminal 'skipped' row for every reel that (a) is
+    # not already queued for this stage AND (b) has ANY parent stage 'skipped'.
+    # Only cascade_skip stages do this (the media-consuming stages); the pending
+    # insert below also uses INSERT OR IGNORE + the "not already queued" clause,
+    # so a reel skip-cascaded here is ignored there (never a double row).
+    if stage.cascade_skip and stage.depends_on:
+        parent_ph = ",".join("?" for _ in stage.depends_on)
+        conn.execute(
+            "INSERT OR IGNORE INTO queue (pk, stage, status, attempts, updated_at) "
+            "SELECT r.pk, ?, 'skipped', 0, ? FROM reels r WHERE "
+            "r.pk NOT IN (SELECT pk FROM queue WHERE stage = ?) "
+            f"AND r.pk IN (SELECT pk FROM queue WHERE stage IN ({parent_ph}) "
+            "AND status = 'skipped')",
+            (stage_name, int(time.time()), stage_name, *stage.depends_on),
+        )
+        conn.commit()
 
     wheres = []
     params = []
