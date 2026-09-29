@@ -79,6 +79,9 @@ class CaptionTest(unittest.TestCase):
         self.assertEqual(c.split("\n"), ["⚠️ unavailable", "", "из DM", "",
                                          "https://www.instagram.com/reel/B1LbfVPlwIA/", "from friend", "#unavailable"])
 
+    def test_empty_tag_no_line(self):
+        self.assertTrue(vc.caption_for(ITEM, tag="").endswith("@chef · 2025-09-29"))
+
     def test_custom_tag_last_line(self):
         self.assertEqual(vc.caption_for(ITEM, tag="#cooking #pasta").split("\n")[-1], "#cooking #pasta")
 
@@ -241,6 +244,17 @@ class PostMediaTest(unittest.TestCase):
             rec = vc.post_media(FakeClient({"items": [item]}), "1", chat="-100", work=self.tmp)
         self.assertEqual(rec["status"], "failed")
         self.assertIn("Bad Request", rec["error"])
+
+
+class DownloadBatchTest(unittest.TestCase):
+    def test_load_batch(self):
+        import vps_download as vd
+        p = os.path.join(tempfile.mkdtemp(), "b.json")
+        with open(p, "w") as f:
+            json.dump([{"pk": 2, "shared_by": "a"}, {"pk": "1"}], f)
+        self.assertEqual(vd.load_batch(p, ""), (["2", "1"], {"2": {"pk": 2, "shared_by": "a"}, "1": {"pk": "1"}}))
+        self.assertEqual(vd.load_batch(p, " 1 ,")[0], ["1"])
+        self.assertEqual(vd.load_batch(p + "x", "5,6"), (["5", "6"], {}))
 
 
 class ServiceHelpersTest(unittest.TestCase):

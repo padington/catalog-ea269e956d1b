@@ -105,7 +105,8 @@ def caption_for(item, shared_by=None, tag=NONPARSED, fallback=None, prefix="", l
     tail_lines = ["https://www.instagram.com/reel/%s/" % code]
     if meta:
         tail_lines.append(meta)
-    tail_lines.append(tag)
+    if tag:
+        tail_lines.append(tag)
     tail = "\n".join(tail_lines)
     head = prefix.strip()
     fixed = (head + "\n\n" if head else "") + tail

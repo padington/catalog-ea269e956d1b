@@ -7,7 +7,8 @@ unavailable per SPEC 3.2, caption per 3.1 with `#nonparsed` (`#unavailable` for 
 
 Env: IG_SESSION_JSON (base64 of ig_session.json), TELEGRAM_BOT_TOKEN, TG_CHAT_ID,
 PKS (comma-separated; optional if batch.json exists), DELAY (seconds between IG calls,
-default 6), MODE=download|inbox.
+default 6), MODE=download|inbox,
+TAG (last caption line, default #nonparsed; set but empty = no tag line).
 batch.json (optional): [{"pk", "shortcode", "shared_by", "caption"}, ...] — shared_by goes to
 the caption, shortcode/caption are fallbacks for unavailable posts.
 Output: results.jsonl — one post_media result per pk:
@@ -51,6 +52,7 @@ def main():
     from instagrapi import Client
     delay = float(os.environ.get("DELAY", "6"))
     chat = os.environ["TG_CHAT_ID"]
+    tag = os.environ.get("TAG", NONPARSED).strip()
     os.makedirs(WORK, exist_ok=True)
     with open("ig_session.json", "wb") as f:
         f.write(base64.b64decode(os.environ["IG_SESSION_JSON"]))
@@ -71,7 +73,7 @@ def main():
     with open("results.jsonl", "a") as out:
         for i, pk in enumerate(pks, 1):
             meta = metas.get(pk, {})
-            rec = post_media(cl, pk, shared_by=meta.get("shared_by") or None, tag=NONPARSED,
+            rec = post_media(cl, pk, shared_by=meta.get("shared_by") or None, tag=tag,
                              fallback=meta, chat=chat, work=WORK)
             out.write(json.dumps(rec, ensure_ascii=False) + "\n"); out.flush()
             counts[rec["status"]] = counts.get(rec["status"], 0) + 1
