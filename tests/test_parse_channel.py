@@ -23,8 +23,24 @@ class LastLine(unittest.TestCase):
         head = CAP.rsplit("\n", 1)[0]
         self.assertEqual(new, head + "\n#cooking #pasta")
 
+    def test_is_retaggable(self):
+        self.assertTrue(pc.is_retaggable("x\n#music #art"))
+        self.assertTrue(pc.is_retaggable(CAP))
+        self.assertFalse(pc.is_retaggable("x\n#unavailable"))
+        self.assertFalse(pc.is_retaggable("x\n#music and text"))
+
     def test_replace_single_line_caption(self):
         self.assertEqual(pc.replace_last_line("#nonparsed", ["other"]), "#other")
+
+    def test_limit_trims_ig_text_keeps_link_meta_and_tags(self):
+        body = ("x" * 1000 + "…\n\nhttps://www.instagram.com/reel/ABC/\n"
+                "@a · 2026-01-01 · from me\n#nonparsed")
+        new = pc.replace_last_line(body, ["cooking", "pasta", "baking"])
+        self.assertLessEqual(pc.tg_len(new), 1024)
+        self.assertTrue(new.endswith("\n\nhttps://www.instagram.com/reel/ABC/\n"
+                                     "@a · 2026-01-01 · from me\n#cooking #pasta #baking"))
+        self.assertTrue(new.startswith("xxx"))
+        self.assertIn("…\n\nhttps://", new)
 
     def test_limit_drops_trailing_tags_keeps_category(self):
         body = "x" * 1000 + "\n#nonparsed"

@@ -2,7 +2,7 @@
 
     PYTHONPATH=. python parse_channel.py [--limit N] [--dry-run] [--only-index]
                                          [--mode bot|user] [--ids 9,10] [--scan-all]
-                                         [--no-publish]
+                                         [--no-publish] [--force --ids ..]
 
 Flow per channel post whose last caption line is exactly `#nonparsed`:
   1. read the post over MTProto (Telethon). Bot mode (default): bots may not call
@@ -88,18 +88,43 @@ def is_nonparsed(caption):
     return last_line(caption) == NONPARSED
 
 
-def replace_last_line(caption, ids, limit=CAPTION_LIMIT):
-    """Replace the last line with `#id #id ...`; everything above is unchanged.
+def _trim_to(text, units):
+    """Cut text to at most `units` UTF-16 units, ending with an ellipsis."""
+    if tg_len(text) <= units:
+        return text
+    out = text
+    while out and tg_len(out) + 1 > units:
+        out = out[:-1]
+    return out.rstrip() + "…" if units > 0 else ""
 
-    If the result would exceed `limit`, trailing hashtags are dropped (the first
-    one — the category — is always kept); full tags stay in the DB/index.
+
+def replace_last_line(caption, ids, limit=CAPTION_LIMIT):
+    """Replace the last line with `#id #id ...`; the lines above are kept.
+
+    Over the limit (the uploader may already have filled 1024 with the IG
+    text): first the IG text block (before the instagram link line) is cut
+    with "…" — link, @author line and the tags stay intact; if that is not
+    enough, trailing hashtags are dropped (the first one is always kept).
+    Full tags stay in the DB/index anyway.
     """
     head, _ = split_last_line(caption)
     ids = list(ids)
+    lines = head.split("\n")
+    link_at = next((i for i, ln in enumerate(lines) if _IG_URL.search(ln)), None)
     while True:
-        new = head + tn.hashtag_line(ids)
-        if tg_len(new) <= limit or len(ids) <= 1:
+        tags = tn.hashtag_line(ids)
+        new = head + tags
+        if tg_len(new) <= limit:
             return new
+        if link_at is not None:
+            text = "\n".join(lines[:link_at]).rstrip()
+            rest = "\n".join(lines[link_at:])
+            sep = "\n\n" if text else ""
+            budget = limit - tg_len(sep + rest + tags)
+            if budget >= 20 or (budget >= 0 and not text):
+                return _trim_to(text, budget) + sep + rest + tags
+        if len(ids) <= 1:
+            return new  # cannot fit; editMessageCaption will fail loudly
         ids.pop()
 
 
@@ -351,10 +376,18 @@ async def scan_ids(client, start=1, chunk=100, empty_chunks=2):
     return msgs
 
 
-async def find_nonparsed(client, mode, ids=None):
+def is_retaggable(caption):
+    """For --force: last line is a hashtag line other than #unavailable."""
+    last = last_line(caption)
+    return last.startswith("#") and last != "#unavailable" and \
+        all(w.startswith("#") for w in last.split())
+
+
+async def find_nonparsed(client, mode, ids=None, force=False):
     if ids:
         got = await client.get_messages(CHANNEL_ID, ids=list(ids))
-        return [m for m in got if m is not None and is_nonparsed(m.message)]
+        ok = is_retaggable if force else is_nonparsed
+        return [m for m in got if m is not None and ok(m.message)]
     if mode == "user":
         found = [m async for m in client.iter_messages(CHANNEL_ID, search=NONPARSED)]
     else:
@@ -497,7 +530,7 @@ async def amain(args):
             if args.scan_all:
                 await harvest(client, conn, args.mode)
             ids = [int(x) for x in args.ids.split(",")] if args.ids else None
-            todo = await find_nonparsed(client, args.mode, ids)
+            todo = await find_nonparsed(client, args.mode, ids, args.force)
             log("found %d #nonparsed post(s)%s" % (
                 len(todo), "" if args.limit is None else ", taking %d" % min(args.limit, len(todo))))
             if args.limit is not None:
@@ -534,6 +567,8 @@ def main(argv=None):
     ap.add_argument("--only-index", action="store_true")
     ap.add_argument("--mode", choices=("bot", "user"), default="bot")
     ap.add_argument("--ids", help="comma-separated message ids to consider")
+    ap.add_argument("--force", action="store_true",
+                    help="with --ids: re-tag posts whose last line is already hashtags")
     ap.add_argument("--scan-all", action="store_true",
                     help="also record already-tagged posts into tg_posts")
     ap.add_argument("--no-publish", action="store_true")
