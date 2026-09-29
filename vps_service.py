@@ -1,210 +1,206 @@
-"""libinsta downloader service (runs on the VPS, in docker).
+"""libinsta downloader service (runs on the VPS, in docker, restart unless-stopped).
 
-Long-polls Telegram updates for the bot. Any Instagram link sent to the bot by
-an allowed user is resolved through the IG cookie session, the video is
-downloaded, posted to the channel with the IG caption + `#nonparsed`, and the
-local file is deleted immediately. No processing happens here — tagging is
-done on the Mac by parse_channel.py, which replaces `#nonparsed` in the caption.
+Long-polls Telegram updates for @libinstabot. Every Instagram link (reel / p / tv /
+share) in a private message from an allowed user is resolved to a media pk, posted
+to the channel by vps_common.post_media (video / photos / unavailable, SPEC 3.2) with
+`#nonparsed`, and the user gets "✅ msg <id>" or "❌ <reason>". Tagging happens on the
+Mac (parse_channel.py replaces `#nonparsed`).
+
+IG throttling / challenge / login_required -> the service pauses IG for 15 min, tells
+the user, keeps the link in /data/queue.json and retries it after the pause. It never
+exits on errors; everything is logged to stdout (`docker logs libinsta`).
 
 Env: IG_SESSION_JSON (base64), TELEGRAM_BOT_TOKEN, TG_CHAT_ID, OWNER_IDS
-(comma-separated telegram user ids allowed to feed links; empty = anyone,
-logged), DATA_DIR (seen.json lives there), DELAY (seconds between IG calls).
+(comma-separated telegram user ids; empty = anyone, ids are logged), DATA_DIR
+(seen.json, queue.json), DELAY (seconds between IG calls), PAUSE (seconds, default 900).
 """
-import base64, json, os, re, time, random, urllib.request, urllib.error, io
+import base64, json, os, random, time
 
-TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-CHAT = os.environ["TG_CHAT_ID"]
+from vps_common import (NONPARSED, channel_link, log, parse_links, parse_share_links,
+                        pk_from_code, post_media, resolve_share_link, tg)
+
 DATA = os.environ.get("DATA_DIR", "/data")
 DELAY = float(os.environ.get("DELAY", "6"))
-OWNERS = {s.strip() for s in os.environ.get("OWNER_IDS", "").split(",") if s.strip()}
+PAUSE = int(os.environ.get("PAUSE", "900"))
 WORK = os.path.join(DATA, "work")
 SEEN = os.path.join(DATA, "seen.json")
-LINK_RE = re.compile(r"instagram\.com/(?:[A-Za-z0-9_.]+/)?(?:reels?|p|tv)/([A-Za-z0-9_-]+)")
-NONPARSED = "#nonparsed"
+QUEUE = os.path.join(DATA, "queue.json")
+
+HELP = ("Кидай ссылки на Instagram (reel / p / tv / share) — скачаю и запощу в канал libinsta "
+        "с #nonparsed. Можно несколько ссылок в одном сообщении или пересланный пост с ссылкой в подписи.\n"
+        "/status — состояние сервиса\n/help — эта подсказка")
 
 
-def log(msg):
-    print(time.strftime("[%Y-%m-%d %H:%M:%S] ") + msg, flush=True)
+def parse_owner_ids(s):
+    return {x.strip() for x in (s or "").split(",") if x.strip()}
 
 
-def tg(method, data=None, files=None, timeout=300):
-    boundary = "----lib%d" % random.randint(1, 10**9)
-    body = io.BytesIO()
-    for k, v in (data or {}).items():
-        body.write(("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n" % (boundary, k, v)).encode())
-    for k, path in (files or {}).items():
-        with open(path, "rb") as f:
-            body.write(("--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"%s\"\r\nContent-Type: application/octet-stream\r\n\r\n" % (boundary, k, os.path.basename(path))).encode())
-            body.write(f.read()); body.write(b"\r\n")
-    body.write(("--%s--\r\n" % boundary).encode())
-    req = urllib.request.Request("https://api.telegram.org/bot%s/%s" % (TOKEN, method), data=body.getvalue(),
-                                 headers={"Content-Type": "multipart/form-data; boundary=%s" % boundary})
+def is_allowed(uid, owners):
+    return not owners or str(uid) in owners
+
+
+def command_of(text):
+    """'/status@libinstabot arg' -> 'status'; None if not a command."""
+    t = (text or "").strip()
+    if not t.startswith("/"):
+        return None
+    return t[1:].split()[0].split("@")[0].lower() if len(t) > 1 else None
+
+
+def load_json(path, default):
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        return {"ok": False, "description": "HTTP %s %s" % (e.code, e.read()[:300].decode("utf-8", "replace"))}
-
-
-def fetch(url, path):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=180) as resp, open(path, "wb") as f:
-        while True:
-            chunk = resp.read(1 << 16)
-            if not chunk:
-                break
-            f.write(chunk)
-    return os.path.getsize(path)
-
-
-def caption_for(item, shared_by=None):
-    cap = ((item.get("caption") or {}).get("text") or "").strip()
-    user = (item.get("user") or {}).get("username") or ""
-    code = item.get("code") or ""
-    taken = item.get("taken_at")
-    date = time.strftime("%Y-%m-%d", time.gmtime(taken)) if taken else ""
-    tail = "https://www.instagram.com/reel/%s/\n@%s · %s" % (code, user, date)
-    if shared_by:
-        tail += " · from %s" % shared_by
-    tail += "\n" + NONPARSED
-    limit = 1024 - len(tail) - 2
-    return (cap[:limit] + "\n\n" + tail).strip()
-
-
-def load_seen():
-    try:
-        return json.load(open(SEEN))
+        with open(path) as f:
+            return json.load(f)
     except Exception:
-        return {}
+        return default
 
 
-def save_seen(seen):
-    tmp = SEEN + ".tmp"
-    json.dump(seen, open(tmp, "w"))
-    os.replace(tmp, SEEN)
+def save_json(path, obj):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(obj, f, ensure_ascii=False)
+    os.replace(tmp, path)
 
 
-def post_media(cl, pk, shared_by=None):
-    """Download one IG media by pk and post it to the channel. Returns a result dict."""
-    rec = {"pk": pk, "status": "failed"}
-    mp4 = os.path.join(WORK, pk + ".mp4"); jpg = os.path.join(WORK, pk + ".jpg")
-    try:
-        info = cl.private_request("media/%s/info/" % pk)
-        items = info.get("items") or []
-        item = items[0] if items else {}
-        rec["product_type"] = item.get("product_type")
-        versions = item.get("video_versions") or []
-        if not versions:
-            for child in item.get("carousel_media") or []:
-                if child.get("video_versions"):
-                    versions = child["video_versions"]
-                    item = dict(item, image_versions2=child.get("image_versions2"),
-                                video_duration=child.get("video_duration"),
-                                original_width=child.get("original_width"),
-                                original_height=child.get("original_height"))
-                    break
-        if not items:
-            rec["status"] = "unavailable"; return rec
-        if not versions:
-            # photo post / photo carousel: album of up to 10 photos straight from the CDN
-            photos = []
-            for child in (item.get("carousel_media") or [item]):
-                cands = ((child.get("image_versions2") or {}).get("candidates") or [])
-                if cands:
-                    photos.append(cands[0]["url"])
-            if not photos:
-                rec["status"] = "no_media"; return rec
-            cap = caption_for(item, shared_by)
-            media = [{"type": "photo", "media": u} for u in photos[:10]]
-            media[0]["caption"] = cap
-            res = tg("sendMediaGroup", {"chat_id": CHAT, "media": json.dumps(media)})
-            if res.get("ok"):
-                rec.update(status="sent", kind="photos", message_id=res["result"][0]["message_id"], n=len(media))
-            else:
-                rec["error"] = "tg: " + str(res.get("description"))[:300]
-            return rec
-        v = versions[0]
-        rec["bytes"] = fetch(v["url"], mp4)
-        thumb = None
-        cands = [c for c in ((item.get("image_versions2") or {}).get("candidates") or [])
-                 if (c.get("width") or 999) <= 320 and (c.get("height") or 999) <= 320]
-        if cands:
+class Service:
+    def __init__(self, cl, chat, owners):
+        self.cl, self.chat, self.owners = cl, chat, owners
+        self.seen = load_json(SEEN, {})
+        self.queue = load_json(QUEUE, [])      # [{"code","pk","chat_id","reply_to","uid"}]
+        self.paused_until = 0
+        self.started = time.time()
+        self.stats = {"sent": 0, "unavailable": 0, "failed": 0, "throttled": 0}
+        self.last_error = ""
+
+    # -- telegram replies
+    def reply(self, chat_id, text, reply_to=None):
+        d = {"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": "true"}
+        if reply_to:
+            d["reply_to_message_id"] = reply_to
+            d["allow_sending_without_reply"] = "true"
+        res = tg("sendMessage", d, timeout=30)
+        if not res.get("ok"):
+            log("reply to %s failed: %s" % (chat_id, res.get("description")))
+
+    def status_text(self, uid):
+        up = int(time.time() - self.started)
+        paused = ("IG на паузе до %s UTC" % time.strftime("%H:%M", time.gmtime(self.paused_until))
+                  if self.paused_until > time.time() else "IG: ok")
+        return ("в канале (seen): %d\nв очереди: %d\n%s\nза этот запуск: %s\naptime: %dч %dм\n"
+                "твой id: %s\nOWNER_IDS: %s%s" % (
+                    len(self.seen), len(self.queue), paused,
+                    ", ".join("%s %d" % kv for kv in self.stats.items()), up // 3600, up % 3600 // 60,
+                    uid, ",".join(sorted(self.owners)) or "не задан (принимаю от всех)",
+                    ("\nпоследняя ошибка: " + self.last_error) if self.last_error else ""))
+
+    # -- incoming messages
+    def handle_message(self, msg):
+        text = msg.get("text") or msg.get("caption") or ""
+        frm = msg.get("from") or {}
+        uid = str(frm.get("id"))
+        chat_id = msg["chat"]["id"]
+        mid = msg.get("message_id")
+        log("msg from id=%s @%s: %r" % (uid, frm.get("username"), text[:120]))
+        if not is_allowed(uid, self.owners):
+            log("ignored: %s not in OWNER_IDS" % uid)
+            return
+        cmd = command_of(text)
+        if cmd in ("start", "help"):
+            self.reply(chat_id, HELP); return
+        if cmd == "status":
+            self.reply(chat_id, self.status_text(uid)); return
+        codes = parse_links(text)
+        for url in parse_share_links(text):
             try:
-                if fetch(cands[0]["url"], jpg) < 190_000:
-                    thumb = jpg
-            except Exception:
-                thumb = None
-        data = {"chat_id": CHAT, "caption": caption_for(item, shared_by), "supports_streaming": "true",
-                "duration": int(item.get("video_duration") or 0)}
-        w = v.get("width") or item.get("original_width"); h = v.get("height") or item.get("original_height")
-        if w and h:
-            data["width"], data["height"] = int(w), int(h)
-        files = {"video": mp4}
-        if thumb:
-            files["thumbnail"] = thumb
-        res = tg("sendVideo", data, files)
-        if res.get("ok"):
-            m = res["result"]
-            rec.update(status="sent", kind="video", message_id=m["message_id"],
-                       file_id=(m.get("video") or {}).get("file_id"), code=item.get("code"))
+                code = resolve_share_link(url)
+            except Exception as exc:
+                code = None
+                log("share link %s: %s" % (url, exc))
+            if code:
+                codes.append(code)
+            else:
+                self.reply(chat_id, "❌ %s: не смогла раскрыть share-ссылку" % url, mid)
+        codes = list(dict.fromkeys(codes))
+        if not codes:
+            if not parse_share_links(text):
+                self.reply(chat_id, "Не вижу ссылки на Instagram. /help", mid)
+            return
+        for code in codes:
+            try:
+                pk = pk_from_code(code)
+            except ValueError as exc:
+                self.reply(chat_id, "❌ %s: %s" % (code, exc), mid); continue
+            if pk in self.seen:
+                m = self.seen[pk].get("message_id")
+                self.reply(chat_id, "%s уже в канале → msg %s %s" % (code, m, channel_link(self.chat, m)), mid)
+                continue
+            if any(q["pk"] == pk for q in self.queue):
+                self.reply(chat_id, "%s уже в очереди" % code, mid); continue
+            self.queue.append({"code": code, "pk": pk, "chat_id": chat_id, "reply_to": mid, "uid": uid})
+        save_json(QUEUE, self.queue)
+        if self.paused_until > time.time() and self.queue:
+            self.reply(chat_id, "⏸ IG на паузе до %s UTC — ссылки в очереди (%d), выложу после паузы." % (
+                time.strftime("%H:%M", time.gmtime(self.paused_until)), len(self.queue)), mid)
+
+    # -- queue worker (one IG call per step)
+    def process_one(self):
+        if not self.queue or self.paused_until > time.time():
+            return False
+        job = self.queue[0]
+        rec = post_media(self.cl, job["pk"], tag=NONPARSED, fallback={"shortcode": job["code"]},
+                         chat=self.chat, work=WORK)
+        st = rec["status"]
+        self.stats[st if st in self.stats else "failed"] += 1
+        log("link %s pk=%s -> %s %s %s" % (job["code"], job["pk"], st, rec.get("kind", ""), rec.get("error", "")))
+        if st == "throttled":
+            self.paused_until = time.time() + PAUSE
+            self.last_error = rec.get("error", "")[:200]
+            job["tries"] = job.get("tries", 0) + 1
+            save_json(QUEUE, self.queue)
+            if job["tries"] > 1:      # tell the user once per link, not every 15 minutes
+                return True
+            why = ("IG просит перелогин (login_required/challenge) — нужен новый IG_SESSION_JSON."
+                   if rec.get("reason") == "login" else "IG притормозил (throttle).")
+            self.reply(job["chat_id"], "⏸ %s %s Пауза %d мин, ссылка останется в очереди и уйдёт после паузы.\n%s" % (
+                job["code"], why, PAUSE // 60, rec.get("error", "")[:200]), job.get("reply_to"))
+            return True     # keep the job at the head of the queue
+        self.queue.pop(0)
+        save_json(QUEUE, self.queue)
+        if st in ("sent", "unavailable"):
+            self.seen[job["pk"]] = {"message_id": rec["message_id"], "kind": rec.get("kind"),
+                                    "code": job["code"], "ts": int(time.time())}
+            save_json(SEEN, self.seen)
+            what = {"video": "видео", "photos": "фото ×%s" % rec.get("n", 1), "text": "⚠️ недоступен в IG"}.get(rec.get("kind"), "")
+            self.reply(job["chat_id"], "✅ %s → msg %s (%s)\n%s" % (
+                job["code"], rec["message_id"], what, channel_link(self.chat, rec["message_id"])), job.get("reply_to"))
         else:
-            rec["error"] = "tg: " + str(res.get("description"))[:300]
-    except Exception as exc:
-        msg = "%s: %s" % (type(exc).__name__, str(exc)[:300])
-        rec["error"] = msg
-        low = msg.lower()
-        if any(s in low for s in ("429", "rate limit", "please wait", "feedback_required", "challenge", "login_required")):
-            rec["status"] = "throttled"
-    finally:
-        for p in (mp4, jpg):
-            if os.path.exists(p):
-                os.remove(p)
-    return rec
-
-
-def reply(chat_id, text, reply_to=None):
-    d = {"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": "true"}
-    if reply_to:
-        d["reply_to_message_id"] = reply_to
-    tg("sendMessage", d, timeout=30)
-
-
-def handle_message(cl, msg, seen):
-    text = (msg.get("text") or msg.get("caption") or "")
-    uid = str((msg.get("from") or {}).get("id"))
-    chat_id = msg["chat"]["id"]
-    if OWNERS and uid not in OWNERS:
-        log("ignored message from %s" % uid)
-        return
-    if text.startswith("/start") or text.startswith("/help"):
-        reply(chat_id, "Кидай ссылки на Instagram (reel / p / tv) — скачаю и запощу в канал с #nonparsed.\n/status — статистика.")
-        return
-    if text.startswith("/status"):
-        reply(chat_id, "seen: %d\nowner: %s" % (len(seen), uid))
-        return
-    codes = LINK_RE.findall(text)
-    if not codes:
-        reply(chat_id, "Не вижу ссылки на Instagram.", msg.get("message_id"))
-        return
-    from instagrapi.extractors import extract_media_v1  # noqa: F401  (import check)
-    for code in dict.fromkeys(codes):
-        try:
-            pk = str(cl.media_pk_from_code(code))
-        except Exception as exc:
-            reply(chat_id, "%s: не смогла разобрать код (%s)" % (code, exc), msg.get("message_id"))
-            continue
-        if pk in seen:
-            reply(chat_id, "%s уже в канале (msg %s)" % (code, seen[pk].get("message_id")), msg.get("message_id"))
-            continue
-        rec = post_media(cl, pk)
-        log("link %s -> %s %s" % (code, rec["status"], rec.get("error", "")))
-        if rec["status"] == "sent":
-            seen[pk] = {"message_id": rec["message_id"], "kind": rec.get("kind"), "ts": int(time.time())}
-            save_seen(seen)
-            reply(chat_id, "✅ %s → msg %s" % (code, rec["message_id"]), msg.get("message_id"))
-        else:
-            reply(chat_id, "❌ %s: %s %s" % (code, rec["status"], rec.get("error", "")), msg.get("message_id"))
+            self.last_error = rec.get("error", "")[:200]
+            self.reply(job["chat_id"], "❌ %s: %s" % (job["code"], rec.get("error", st)), job.get("reply_to"))
         time.sleep(DELAY + random.uniform(0, DELAY / 2))
+        return True
+
+    def run(self):
+        log("service up; seen=%d queue=%d owners=%s" % (len(self.seen), len(self.queue),
+                                                        ",".join(sorted(self.owners)) or "any"))
+        offset = 0
+        while True:
+            try:
+                busy = bool(self.queue) and self.paused_until <= time.time()
+                res = tg("getUpdates", {"offset": offset, "timeout": 0 if busy else 50,
+                                        "allowed_updates": json.dumps(["message"])}, timeout=70)
+                if not res.get("ok"):
+                    log("getUpdates: %s" % res.get("description")); time.sleep(5); continue
+                for upd in res["result"]:
+                    offset = upd["update_id"] + 1
+                    msg = upd.get("message")
+                    if msg and msg.get("chat", {}).get("type") == "private":
+                        self.handle_message(msg)
+                self.process_one()
+            except KeyboardInterrupt:
+                return
+            except Exception as exc:
+                log("loop error: %s: %s" % (type(exc).__name__, str(exc)[:300]))
+                time.sleep(5)
 
 
 def main():
@@ -214,26 +210,11 @@ def main():
     with open(sess, "wb") as f:
         f.write(base64.b64decode(os.environ["IG_SESSION_JSON"]))
     cl = Client()
-    cl.load_settings(sess)
-    os.remove(sess)
-    seen = load_seen()
-    log("service up; seen=%d owners=%s" % (len(seen), sorted(OWNERS) or "any"))
-    offset = 0
-    while True:
-        try:
-            res = tg("getUpdates", {"offset": offset, "timeout": 50, "allowed_updates": json.dumps(["message"])}, timeout=70)
-            if not res.get("ok"):
-                log("getUpdates: %s" % res.get("description")); time.sleep(5); continue
-            for upd in res["result"]:
-                offset = upd["update_id"] + 1
-                msg = upd.get("message")
-                if msg and msg["chat"]["type"] == "private":
-                    handle_message(cl, msg, seen)
-        except KeyboardInterrupt:
-            return
-        except Exception as exc:
-            log("loop error: %s: %s" % (type(exc).__name__, str(exc)[:300]))
-            time.sleep(5)
+    try:
+        cl.load_settings(sess)
+    finally:
+        os.remove(sess)
+    Service(cl, os.environ["TG_CHAT_ID"], parse_owner_ids(os.environ.get("OWNER_IDS"))).run()
 
 
 if __name__ == "__main__":
