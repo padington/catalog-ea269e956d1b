@@ -59,6 +59,52 @@ CREATE TABLE IF NOT EXISTS stage_runs (
 """
 
 
+# SPEC §3.3: Telegram-channel columns. tg_status/tg_error are backlog
+# bookkeeping (last download outcome: sent|no_video|unavailable|failed|
+# throttled|manual) so non-video posts are not re-selected on every batch.
+TG_COLUMNS = (
+    ("tg_message_id", "INTEGER"),
+    ("tg_file_id", "TEXT"),
+    ("tg_kind", "TEXT"),          # 'video' | 'photos' | 'text'
+    ("tg_posted_at", "INTEGER"),
+    ("tags_final", "TEXT"),       # JSON list
+    ("parsed_at", "INTEGER"),
+    ("tg_status", "TEXT"),
+    ("tg_error", "TEXT"),
+)
+
+
+def missing_tg_columns(conn):
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(reels)")}
+    return [name for name, _ in TG_COLUMNS if name not in cols]
+
+
+def migrate_tg_columns(conn):
+    """Add the §3.3 columns if absent. Idempotent, lossless (nullable ADDs)."""
+    missing = set(missing_tg_columns(conn))
+    for name, typ in TG_COLUMNS:
+        if name in missing:
+            conn.execute("ALTER TABLE reels ADD COLUMN %s %s" % (name, typ))
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_reels_tg_message_id ON reels(tg_message_id)")
+    conn.commit()
+    return sorted(missing)
+
+
+def backup_db(path, suffix=None):
+    """cp reels.db reels.db.bak-<suffix> (sqlite online backup, safe while open)."""
+    suffix = suffix or time.strftime("%Y%m%d-%H%M%S")
+    dst = "%s.bak-%s" % (path, suffix)
+    src = sqlite3.connect(path)
+    try:
+        out = sqlite3.connect(dst)
+        with out:
+            src.backup(out)
+        out.close()
+    finally:
+        src.close()
+    return dst
+
+
 def init_db(conn):
     conn.execute(SCHEMA)
     # Migrate older DBs that predate the free-form `tags` column.
@@ -78,6 +124,7 @@ def init_db(conn):
     conn.execute(QUEUE_SCHEMA)
     conn.execute(QUEUE_INDEX)
     conn.execute(STAGE_RUNS_SCHEMA)
+    migrate_tg_columns(conn)
     conn.commit()
 
 
