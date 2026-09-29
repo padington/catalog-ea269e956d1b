@@ -93,6 +93,8 @@ def main():
             info = cl.private_request("media/%s/info/" % pk)
             items = info.get("items") or []
             item = items[0] if items else {}
+            rec["media_type"] = item.get("media_type"); rec["product_type"] = item.get("product_type")
+            rec["n_carousel"] = len(item.get("carousel_media") or [])
             versions = item.get("video_versions") or []
             if not versions:
                 # carousel: take the first video child, keep the parent's caption/user
