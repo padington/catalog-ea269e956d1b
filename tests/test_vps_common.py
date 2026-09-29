@@ -90,9 +90,28 @@ class MediaPickTest(unittest.TestCase):
     def test_thumb_largest_within_320(self):
         item = {"image_versions2": {"candidates": [cand(1080, 1920), cand(320, 568), cand(240, 426), cand(180, 320),
                                                    cand(320, 320), cand(150, 150)]}}
-        self.assertEqual(vc.pick_thumb(item), "https://cdn/320x320.jpg")
-        self.assertIsNone(vc.pick_thumb({"image_versions2": {"candidates": [cand(1080, 1920)]}}))
-        self.assertIsNone(vc.pick_thumb({}))
+        self.assertEqual(vc.pick_thumb(item), ("https://cdn/320x320.jpg", False))
+        self.assertEqual(vc.pick_thumb({}), (None, False))
+
+    def test_thumb_clip_without_small_candidate_needs_resize(self):
+        item = {"image_versions2": {"candidates": [cand(1080, 1920), cand(480, 853), cand(240, 426)]}}
+        self.assertEqual(vc.pick_thumb(item), ("https://cdn/240x426.jpg", True))
+        self.assertEqual(vc.thumb_size(240, 426), (180, 320))
+        self.assertEqual(vc.thumb_size(1080, 1080), (320, 320))
+        self.assertEqual(vc.thumb_size(200, 100), (200, 100))
+
+    def test_make_thumb(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("no Pillow")
+        d = tempfile.mkdtemp()
+        src, dst = os.path.join(d, "a.png"), os.path.join(d, "b.jpg")
+        Image.effect_noise((720, 1280), 60).convert("RGB").save(src)
+        self.assertTrue(vc.make_thumb(src, dst))
+        with Image.open(dst) as im:
+            self.assertEqual((im.format, im.size), ("JPEG", (180, 320)))
+        self.assertLess(os.path.getsize(dst), 200_000)
 
     def test_video_plain(self):
         item = dict(ITEM, video_versions=[{"url": "v1", "width": 720, "height": 1280}], video_duration=12.6)
@@ -109,7 +128,7 @@ class MediaPickTest(unittest.TestCase):
         view, v = vc.pick_video(item)
         self.assertEqual(v["url"], "v2")
         self.assertEqual(view["code"], "DQbVZ2aEdZl")
-        self.assertEqual(vc.pick_thumb(view), "t2")
+        self.assertEqual(vc.pick_thumb(view), ("t2", False))
         self.assertEqual(vc.video_params(view, v), {"duration": 5, "width": 1080, "height": 1350})
 
     def test_photo_carousel(self):

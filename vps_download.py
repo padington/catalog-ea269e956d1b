@@ -16,8 +16,9 @@ Output: results.jsonl — one post_media result per pk:
    "file_id","width","height","duration","code","author","ig_caption","taken_at","error",...}
 Two throttled results stop the batch.
 """
-import base64, json, os, random, time
+import base64, json, os, random, sys, time
 
+sys.dont_write_bytecode = True   # runs as root in docker on a bind mount: no root-owned __pycache__ for the runner
 from vps_common import NONPARSED, log, post_media
 
 WORK = "work"

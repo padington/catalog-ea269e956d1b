@@ -138,15 +138,48 @@ def pick_video(item):
 
 
 def pick_thumb(item, max_side=THUMB_MAX_SIDE):
-    """URL of the largest IG image candidate with both sides <= max_side, or None."""
-    best = None
+    """(url, needs_resize) for the video thumbnail, or (None, False).
+    Prefers the largest IG candidate with both sides <= max_side (sent as is); IG clips often have
+    none (240x426 is the smallest), then the smallest larger candidate is taken and must be
+    downscaled by make_thumb()."""
+    fit, big = None, None
     for c in (item.get("image_versions2") or {}).get("candidates") or []:
         w, h = c.get("width") or 0, c.get("height") or 0
-        if not c.get("url") or not w or not h or w > max_side or h > max_side:
+        if not c.get("url") or not w or not h:
             continue
-        if best is None or w * h > best[0]:
-            best = (w * h, c["url"])
-    return best[1] if best else None
+        if w <= max_side and h <= max_side:
+            if fit is None or w * h > fit[0]:
+                fit = (w * h, c["url"])
+        elif big is None or w * h < big[0]:
+            big = (w * h, c["url"])
+    if fit:
+        return fit[1], False
+    if big:
+        return big[1], True
+    return None, False
+
+
+def thumb_size(w, h, max_side=THUMB_MAX_SIDE):
+    """Aspect-preserving size with the longer side = min(max_side, current)."""
+    k = min(1.0, float(max_side) / max(w, h))
+    return max(1, int(round(w * k))), max(1, int(round(h * k)))
+
+
+def make_thumb(src, dst, max_side=THUMB_MAX_SIDE, max_bytes=THUMB_MAX_BYTES):
+    """Downscale an image to a JPEG within max_side x max_side and < max_bytes. Needs Pillow
+    (instagrapi pulls it in); returns False if Pillow is missing or the result is too big."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return False
+    with Image.open(src) as im:
+        im = im.convert("RGB")
+        im = im.resize(thumb_size(im.width, im.height, max_side))
+        for q in (85, 70, 55, 40):
+            im.save(dst, "JPEG", quality=q)
+            if os.path.getsize(dst) < max_bytes:
+                return True
+    return False
 
 
 def pick_photos(item, max_n=MAX_ALBUM):
@@ -338,19 +371,33 @@ def post_media(cl, pk, shared_by=None, tag=NONPARSED, fallback=None, chat=None, 
             return rec
         data = dict(chat_id=chat, caption=cap, supports_streaming="true", **video_params(view, version))
         files = {"video": mp4}
-        thumb_url = pick_thumb(view)
+        thumb_url, resize = pick_thumb(view)
         if thumb_url:
             try:
-                if fetch(thumb_url, jpg) < THUMB_MAX_BYTES:
+                if resize:
+                    raw = jpg + ".src"
+                    try:
+                        fetch(thumb_url, raw)
+                        ok = make_thumb(raw, jpg)
+                    finally:
+                        if os.path.exists(raw):
+                            os.remove(raw)
+                else:
+                    ok = fetch(thumb_url, jpg) < THUMB_MAX_BYTES
+                if ok:
                     files["thumbnail"] = jpg
-            except Exception:
-                pass
+            except Exception as exc:
+                rec["thumb_error"] = "%s: %s" % (type(exc).__name__, str(exc)[:100])
         res = tg("sendVideo", data, files)
         if res.get("ok"):
             m = res["result"]
+            tv = m.get("video") or {}
             rec.update(status="sent", kind="video", message_id=m["message_id"],
-                       file_id=(m.get("video") or {}).get("file_id"), thumb="thumbnail" in files,
-                       width=data.get("width"), height=data.get("height"), duration=data["duration"])
+                       file_id=tv.get("file_id"), thumb="thumbnail" in files,
+                       width=data.get("width"), height=data.get("height"), duration=data["duration"],
+                       # what Telegram stored — checked against width/height to catch a broken aspect ratio
+                       tg_video={"width": tv.get("width"), "height": tv.get("height"),
+                                 "duration": tv.get("duration"), "thumb": bool(tv.get("thumbnail") or tv.get("thumb"))})
         else:
             rec["error"] = _tg_error(res)
     except Exception as exc:
