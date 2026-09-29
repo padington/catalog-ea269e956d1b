@@ -1,0 +1,1523 @@
+# Дерево тегов libinsta (SPEC §3.4). Первая версия собрана tags_tree_build.py
+# из размеченных постов reels.db (llama3.2 + переводы qwen2.5vl), 17 id/названий
+# поправлены руками 30.09.2026. Черновик: дальше правится владельцем.
+# id = хэштег ([a-z0-9_]+). aliases — свободные теги tags.py, которые
+# схлопываются в узел. only_with_parent: true — тег засчитывается, только
+# если у поста есть родительская категория (утечка примера старого промпта).
+- id: other
+  title: Разное
+  children:
+  - id: film_culture
+    title: Кино и культура
+    aliases:
+    - film
+    - kino
+    - cinema
+    - cinematography
+    - theatre
+    - movie-night
+    - netflix
+    - romcom
+    - sofa
+    - st-petersburg
+    - archeology
+    - bella-ciao
+    - bob-kelso
+    - bontime-jaffa-cake
+    - frame
+    - gods
+    - gorp-core
+    - industry
+    - italian-cinema
+    - legenda
+    - scrubs
+    - summit
+    - themes
+    - training
+  - id: mindful_living
+    title: Сознательная жизнь
+    aliases:
+    - mindfulness
+    - journaling
+    - meditation
+    - yoga
+    - journal
+    - applepodcasts
+    - energy-levels
+    - midori
+    - personal-trauma
+    - pillow
+  - id: fitness_and_movement
+    title: Фитнес и движение
+    aliases:
+    - dumbbell
+    - ettlebell
+    - camping
+    - pushup
+    - horses
+  - id: food_and_cooking
+    title: Еда и приготовление
+    aliases:
+    - oven
+    - coffee
+    - bbq-grill
+    - egg
+    - macarons
+    - microfiber-cloth
+    - nylon
+    - salad
+    - dark-chocolate
+    - home-cooked
+    - kettledish
+    - pistachio
+    - sashimi
+    - yeast
+  - id: travel_and_adventure
+    title: Путешествия и приключения
+    aliases:
+    - france
+    - river
+    - ohrid
+  - id: creative_expression
+    title: Креативное выражение
+    aliases:
+    - furniture
+    - girya
+    - guitar
+    - storytelling
+    - vintage
+    - fenix
+    - kaleidoscope
+    - designing
+- id: fitness
+  title: Фитнес
+  children:
+  - id: kettlebell
+    title: Гири
+    aliases:
+    - kettlebell
+    only_with_parent: true
+  - id: deadlift
+    title: Становая тяга
+    aliases:
+    - deadlift
+    only_with_parent: true
+  - id: home_workout
+    title: Тренировки дома
+    aliases:
+    - home-workout
+    only_with_parent: true
+  - id: bodyweight
+    title: Упражнения с весом тела
+    aliases:
+    - plank
+    - push-ups
+    - burpees
+    - thrusters
+    - abs
+    - core
+    - push-up
+    - bodyweight
+    - chest-press
+    - hip-mobility
+    - hip-mobilization
+    - hip-thrust
+    - lunges
+    - plank-pull-through
+    - side-plank
+    - archetype
+    - around-the-world
+    - audio-instruction
+    - booty
+    - cat-stretch
+    - circuit
+    - core-stability
+    - crunches
+    - diamond-pushups
+    - flexin
+    - full-body
+    - garcia-effect
+    - glute-activation
+    - gorillaswing
+    - half-kneeling
+    - hip-flexor-drill
+    - humeral-rotations
+    - jump-lunge
+    - marching
+    - neck
+    - pendulum
+    - plank-hold
+    - rotational-strength
+    - saw
+    - scapular-mobilization
+    - serratus
+    - shoulder
+    - shoulder-stability
+    - shoulders
+    - shrugs
+    - side-swing
+    - single-z-press
+    - situps
+    - spinal-release
+    - stretches
+    - thoracic-spine
+    - trap-shrugs
+    - vadim
+    - yoga-block
+  - id: home_gym_equipment
+    title: Домашний спортзал
+    aliases:
+    - swings
+    - kettlebell-swing
+    - atlas-swing
+    - home-gym
+    - 16kg
+    - balance-boards
+    - frontal-rollercoaster-swing
+    - shoes
+  - id: resistance_band_workouts
+    title: Резистентные упражнения
+    aliases:
+    - band
+    - balance
+    - resistance-band
+    - slingshot
+  - id: barbell_dumbbell
+    title: Штанга и гантели
+    aliases:
+    - barbell
+    - dumbbells
+    - goblet-squat
+    - shoulder-press
+    - floor-press
+    - bell
+    - biceps
+    - curl-press
+    - goblet-thruster
+    - lifts
+    - press
+    - chest
+    - cleans
+    - cross-chops
+    - curl
+    - curls
+    - goblet-back-lunge
+    - goblet-dead-high-pull
+    - goblet-shoulder-press
+    - goblet-thrusters
+    - gunslingers
+    - kettlebells
+    - one-leg-warrior-halo
+    - pivot-lunge-swing
+    - reverse-lunge
+    - romanian-dl
+    - side-swing-lunges
+    - single-arm-rows
+    - snatches
+    - suitcase-deadlift
+    - sumo-deadlifts
+    - swing-clean
+    - thruster
+    - thrusts
+  - id: pull_ups_rows
+    title: Подтягивания и тяги
+    aliases:
+    - rows
+    - pull-up
+    - pull-up-bar
+    - lat-pulldown
+    - bent-over-row
+    - cross-body
+    - presses
+    - rotator-cuff
+    - bent-rows
+    - dead-high-pull
+    - lats
+    - pulls
+    - shoulder-girdle
+    - two-hand-row
+- id: education
+  title: Обучение
+  children:
+  - id: learning_strategies
+    title: Стратегии обучения
+    aliases:
+    - framework
+    - notebook
+    - pencil
+    - question
+    - questions
+    - 4mat
+    - adhd
+    - credibility
+    - framing
+    - hypofocus
+    - influence
+    - reciprocity
+    - sincerity
+    - strategie
+    - video
+  - id: career_development
+    title: Развитие карьеры
+    aliases:
+    - podcast
+    - resume
+    - career-advice
+    - workshop
+    - consultation
+    - job-description
+    - networking
+    - pitch
+    - budgeting
+    - careergoals
+    - careerplanning
+    - commute-ritual
+    - corporate-ladder
+    - corporate-skills
+    - habit-forming
+    - hiring-manager
+    - job-offer
+    - network
+    - objectives
+    - pivotal-moment
+    - priorities
+    - professions
+    - relationship-coaching
+    - strategic-planning
+    - uk-strategy
+  - id: personal_growth
+    title: Личный рост
+    aliases:
+    - book
+    - cognitive-behavioral
+    - mirror
+    - philosophy
+    - self-awareness
+    - attachmentstyles
+    - beliefs
+    - biological-rhythms
+    - brain-stem
+    - cognitive
+    - emotionalneglect
+    - gratitude-journal
+    - mental-health
+    - neural
+    - psychotherapy
+    - redirect
+    - reframe
+    - self-esteem
+    - self-help
+    - self-improvement
+    - silence
+    - stress-management
+  - id: leadership_skills
+    title: Навыки лидерства
+    aliases:
+    - leadership
+    - behavioral-based
+    - behavioral-questions
+    - core-engagement
+    - leadership-development
+    - negotiation
+    - competency
+    - decision-making-template
+    - group-management
+    - problem-solving-framework
+    - rational-persuasion
+    - team-alignment
+  - id: productivity_techniques
+    title: Техники продуктивности
+    aliases:
+    - project-management
+    - leetcode
+    - time-management
+    - exercise-tips
+    - pomodoro-technique
+    - productivity-tips
+    - win-tracker
+    - workout-routine
+    - yoga-poses
+  - id: business_tools
+    title: Инструменты управления
+    aliases:
+    - company
+    - harvard-business-review
+    - business-management
+    - client-onboarding
+    - contract
+    - exec-meeting
+    - operacionka
+    - operational-planning
+    - project-timeline
+    - revenue
+    - scheduling-tool
+    - tactical-planning
+    - vendor-a
+    - video-calls
+- id: travel
+  title: Путешествия
+  children:
+  - id: peterburg_explored
+    title: Путеводитель по Петербургу
+    aliases:
+    - peterburg
+    - petersburg
+    - spb
+    - petrograd
+    - sankt-peterburg
+    - aeroplume
+    - grand-hotel-moika
+    - gremyachaya
+    - izborssk
+    - kavkaz
+    - khausta
+    - kremle
+    - marmaladovskiy
+    - olgin-skaya
+    - pokrovskaya
+    - priozerskoe-shosse
+    - pskov-kreml
+    - ruskie-cha
+    - tsaepitie
+    - vodka
+  - id: beach_resorts
+    title: Пляжные курорты мира
+    aliases:
+    - beach
+    - kayak
+    - beach-resort
+    - paddleboard
+    - la-maddalena
+    - porto-chervo
+  - id: cycling_trails
+    title: Велосипедные трассы и дороги
+    aliases:
+    - cycle-road
+    - kycle-pacific-road
+    - road-bike
+    - road-cycling
+    - trail-run
+  - id: foodie_adventures
+    title: Еда в Азии и Европе
+    aliases:
+    - kotlet
+    - sushi
+    - ramen
+    - shawarma
+    - restaurant
+    - bento
+    - okonomiyaki
+    - pryanik
+    - ryba
+    - yakitori
+  - id: mountain_escapes
+    title: Горные укрытия и маршруты
+    aliases:
+    - mountain
+    - cottage
+    - dolomiti
+    - village
+  - id: turkish_resorts
+    title: Турецкие курорты и отели
+    aliases:
+    - hotel
+    - otel
+    - resort
+    - ezme
+    - hamam
+    - kabab
+    - kebap
+    - lavash
+    - merih-hotel
+    - spit
+    - sumac
+    - turkish-resort
+- id: comedy
+  title: Юмор
+  children:
+  - id: comedy_sketches
+    title: Комедийные сценки
+    aliases:
+    - sketch
+    - king
+    - robocop
+  - id: mindfulness_exercise
+    title: Упражнения по присутствию
+    aliases:
+    - mindfulness-exercise
+    - gpt
+  - id: gym_humor
+    title: Юмор про спортзал
+    aliases:
+    - home-workout-routine
+    - kettlebell-squat
+    - powerlifting
+    - weight
+    - armbar
+    - half-squat
+    - muaythai
+    - power
+    - takedown
+  - id: corporate_speak_critique
+    title: Критика делового языка
+    aliases:
+    - scrum-master
+    - the-sopranos
+    - critique
+    - impediment
+    - sopranos
+  - id: improv
+    title: Импровизация
+    aliases:
+    - hand-gestures
+  - id: laughing_at_myself
+    title: Смеяться над собой
+    aliases:
+    - laughter
+  - id: emotional_intelligence
+    title: Эмоциональный интеллект
+    aliases:
+    - emotional-intelligence
+    - actor
+- id: cooking
+  title: Готовка
+  children:
+  - id: cooking_techniques
+    title: Техники приготовления
+    aliases:
+    - bread
+    - brioche
+    - butter
+    - pan
+    - spoon
+    - whisk
+    - asparagi
+    - braising
+    - breakfast
+    - chuckbox
+    - dner
+    - eggs
+    - karamelize
+    - kettlebell-style
+    - oil
+    - pancirey
+    - scombroid
+    - shaker
+    - strast
+    - vivid-details
+    - wood-fired-oven
+  - id: global_cuisine
+    title: Мировая кухня
+    aliases:
+    - soy-sauce
+    - garlic
+    - coconut-milk
+    - ginger
+    - basil
+    - recipe
+    - basmati
+    - citric-acid
+    - complex-carb
+    - cumin
+    - cypriot-olive-oil
+    - dates
+    - garam-masala
+    - gazelle
+    - glutinous-rice-flour
+    - grapefruit
+    - honey
+    - kaffir-lime-leaves
+    - kimchi
+    - lemon
+    - lime
+    - maggi-powder
+    - mayyas
+    - olive-oil
+    - oregano
+    - paprika
+    - pesto
+    - pink-chai
+    - priklad
+    - rivas
+    - style
+    - temu
+    - thai-green-curry
+    - tomate
+    - voprosy
+    - wine
+  - id: baking_instruments
+    title: Приборы для выпечки
+    aliases:
+    - baking-soda
+    - butter-dispenser
+    - mozzarella
+    - silicone-brush
+  - id: vegetarian_dishes
+    title: Вегетарианские блюда
+    aliases:
+    - rice
+    - buckwheat
+    - demibleneder
+    - la-biga
+    - lemony-butter-beans
+    - oyster-mushrooms
+    - perescorn-sauce
+    - shrimp-jeot
+    - suuuni
+  - id: meat
+    title: Мясо
+    aliases:
+    - tuna
+    - chicken
+    - tonkatsu
+    - anchovy-sauce
+    - cachaa
+    - chipotle
+    - detroit-style
+    - drumstick
+    - kochschinken
+    - parmigiano
+    - protein
+    - skewers
+    - spartan
+  - id: soups_and_sides
+    title: Супы и гарниры
+    aliases:
+    - tomato
+    - avocado
+    - potato
+    - mayo
+    - napa-cabbage
+    - onion
+    - snack
+  - id: desserts_and_snacks
+    title: Десерты и закуски
+    aliases:
+    - cream
+    - cheesecake
+    - espresso
+    - yogurt
+    - basque-cheesecake
+    - caramel
+    - dessert
+    - whipped-cream
+- id: motivation
+  title: Мотивация
+  children:
+  - id: goal_setting
+    title: Цели
+    aliases:
+    - goal-setting
+    - planner
+    - result
+    - vision-board
+    - affirmations
+    - avoidance
+    - bullet-journal
+    - disciplina
+    - step
+    - strategia
+    - unstuck-technique
+  - id: mindset_shifts
+    title: Менталитет
+    aliases:
+    - mindset
+    - breath
+    - emotional-awareness
+    - programmed-self
+    - quiet-strength
+  - id: self_care_routines
+    title: Уход за собой
+    aliases:
+    - self-care
+    - emotional-state
+    - gut-health-protocols
+  - id: motivation_productivity
+    title: Продуктивность
+    aliases:
+    - checklist
+    - consultant
+    - pause
+    - pomodoro
+    - programm
+    - tomato-timer
+  - id: personal_growth_journey
+    title: Развитие
+    aliases:
+    - frog
+    - leap
+    - plan-of-action
+  - id: resilience
+    title: Устойчивость
+    aliases:
+    - trauma
+- id: music
+  title: Музыка
+  children:
+  - id: music_genre
+    title: Жанр музыки
+    aliases:
+    - vinyl
+    - blue-note
+    - album
+    - ataubaque
+    - bossa-nova
+    - cmajor
+    - daft-punk
+    - disco
+    - drum-and-bass
+    - kamasi-washington
+    - radiohead
+    - return-to-seoul
+    - samba
+    - steve-winwood
+    - tamancas
+    - venetian-snares
+    - xote
+    - zabumba
+  - id: instrumentation
+    title: Инструментация
+    aliases:
+    - synthesizer
+    - am-radio
+    - bandura
+    - drums
+    - fader
+    - fender-rhodes
+    - flute
+    - kayf
+    - lengvin
+    - orchestra
+    - saxophone
+    - subway-bass
+    - tambourine
+    - zero7hq
+  - id: equipment
+    title: Оборудование
+    aliases:
+    - track
+    - cassette-tape
+    - record-player
+    - abelton
+    - algorave-software
+    - dampeningpad
+    - denham-audio
+    - drum-machine
+    - instavinylgram
+    - keycap
+    - moog
+    - music-kit
+    - music-video
+    - old-phone
+    - presets
+    - recordingstudio
+    - remix
+    - vintage-reel-to-reel
+    - vinylcollection
+    - vocoder
+  - id: artist_styles
+    title: Стили исполнителей
+    aliases:
+    - paradise
+    - satriales
+    - thomyorke
+    - adrianyoung
+    - amaya
+    - backstage
+    - bob-sinclar
+    - bobbyacala
+    - brianmolko
+    - call-on-me
+    - ciranda
+    - club-era
+    - dj-falcon
+    - eric-prydz
+    - frances-ha
+    - garons
+    - gym-tonic
+    - hoboken
+    - illya-kazakov
+    - jackhues
+    - johannjoest
+    - luca-guadagnino
+    - millennial-meltdown
+    - monika
+    - nickfeldman
+    - placebo
+    - puppet
+    - ryder
+    - sample
+    - sergej-parajanov
+    - sofia-coppola
+    - vladimir-menshkov
+  - id: mood_and_atmosphere
+    title: Настроение и атмосфера
+    aliases:
+    - knee-deep
+    - atmospheric
+    - beatbox
+    - humming
+    - lounge
+    - soundscapes
+    - valerie
+    - vibe
+- id: art
+  title: Искусство
+  children:
+  - id: art_mediums
+    title: Средства искусства
+    aliases:
+    - acrylic
+    - canvas
+    - glass
+    - acrylic-gel
+    - canvas-frame
+    - cast-photo
+    - cat
+    - charcoal
+    - drawing
+    - geometric-shapes
+    - horse
+    - kneaded-eraser
+    - marblesculpture
+    - marker
+    - metal-decor
+    - metallic-logo
+    - mosaika
+    - oil-painting
+    - oil-pastels
+    - oilpainting
+    - paws
+    - pebble
+    - polyurethane-gel
+    - rainbow-stripes
+    - resin-art
+    - rosy-glass
+    - scuplture
+    - vase
+    - woodblock
+    - yandex
+  - id: art_techniques
+    title: Техники искусства
+    aliases:
+    - water
+    - eda
+    - sculpture
+    - thread-painting
+  - id: inspiration_sources
+    title: Источники вдохновения
+    aliases:
+    - sketchbook
+    - flower
+    - bench
+    - books
+    - sketching
+    - tree
+    - butterfly-drawing
+    - crate
+    - dreamscapes
+    - inkwell
+  - id: art_processes
+    title: Процессы искусства
+    aliases:
+    - book-sculpture
+    - dir-illustration
+    - illustration-awards
+    - perspective
+    - softhands
+    - worldbuilding
+    - youtube
+  - id: art_related_concepts
+    title: Связанные концепции
+    aliases:
+    - author
+    - avengers
+    - bold-typography
+    - character
+    - color-theory
+    - comfort-zone
+    - complexity
+    - delegation
+    - dog
+    - dolce-vita
+    - edge
+    - gollum
+    - impressionism
+    - italian-philosophy
+    - metamodernism
+    - paradigm
+    - polyptych
+    - rembrandt
+    - sovereignty
+    - st-bavos-cathedral
+    - system
+    - tapes
+- id: architecture
+  title: Архитектура
+  children:
+  - id: urban_landscapes
+    title: Городские пейзажи
+    aliases:
+    - ceiling
+    - beton
+    - bus-stop
+    - ceanview
+    - charcoal-roof
+    - city-watch
+    - contemporary-architecture
+    - cranes
+    - cross-laminated-timber
+    - fireplace
+    - gabled-roof
+    - haus-zum-pudel
+    - kiosk
+    - layouts
+    - loft-design
+    - loftapartment
+    - maloetazhki
+    - marina
+    - moyka
+    - nevsky
+    - panorama-window
+    - parklet
+    - rainbow-flats
+    - rammed-earth
+    - residence
+    - restaurants
+    - rice-field
+    - sphinxes
+    - stone-slab
+    - sugar-house
+    - t93
+    - terrassa
+    - wooden-house
+    - yangshuo
+  - id: interior_designs
+    title: Интерьеры
+    aliases:
+    - kitchen
+    - americanfilm
+    - archpole-table
+    - curtain-rail
+    - elevated-bed
+    - hollywood
+    - interior-design
+    - kitchen-island
+    - patio
+    - pocket-door
+    - sleek
+    - white
+    - woodenfloor
+  - id: material_experiments
+    title: Эксперименты с материалами
+    aliases:
+    - pallet
+    - 3d-printed
+    - caravan
+    - cedar-wood
+    - clay-tile
+    - copper
+    - diseo-contemporneo
+    - lime-plaster
+    - nordicwood
+    - rochor
+    - straw-bale
+    - tartan
+    - timber
+  - id: cultural_buildings
+    title: Культурные здания
+    aliases:
+    - museum
+    - paris
+    - arquitectura
+    - boutique-hotel
+    - fasad
+    - hilton
+    - isaakiyskoye-square
+    - isakievskiy
+    - khrushchevsky
+    - kotel
+    - marraquech
+    - mykonos-architecture
+    - nevrsky
+    - stalinokanachernoy
+    - sur-arquitectos
+    - vsgcontemporary
+  - id: natural_elements
+    title: Натуральные элементы
+    aliases:
+    - forest
+    - iska-saunas
+    - lighthouse-sauna
+    - olive-trees
+    - soil
+- id: finance
+  title: Финансы
+- id: diy
+  title: Своими руками
+  children:
+  - id: storage_organizing
+    title: Хранение и организация
+    aliases:
+    - blum
+    - mats
+    - bamboo
+    - candle
+    - desk-lamp
+    - diorama
+    - fall-florals
+    - fold-out
+    - glassblock
+    - glasses-stand
+    - homemade
+    - ice-bucket
+    - kite-string
+    - kryukka
+    - miija-desk-lamp
+    - oil-rig
+    - rope
+    - star
+    - table-light
+    - torcevaya-stancha
+    - veshalok
+    - wax
+  - id: fitness_equipment
+    title: Фитнес Оборудование и Упражнения
+    aliases:
+    - gym-routine
+    - medicine-ball
+    - barbell-curl
+    - bosu-ball
+    - cross-crunch
+    - cycling
+    - farrimond-friction-hitch
+    - feet-fall
+    - ik-2foam
+    - squat-rack
+    - vertical-squat
+  - id: home_improvement
+    title: Ремонт Дома и Декор
+    aliases:
+    - desk
+    - cabinet
+    - cement
+    - ducca
+    - hpl
+    - hplsupermat
+    - kitchen-loft
+    - metal-brackets
+    - scrap-wood
+    - side-table
+    - spring-loaded
+    - wall-dip
+    - wall-hanger
+    - wood-rotation-tool
+  - id: crafting_supplies
+    title: Материалы для Творчества и Хобби
+    aliases:
+    - atelier
+    - crafting
+    - crochet-hook
+    - knitting-needles
+    - origami-paper
+    - topstitching
+    - waistband
+    - wouters-leather
+  - id: cleaning_tools
+    title: Средства Чистки и Инструменты
+    aliases:
+    - mop
+    - broom
+    - cardboard
+    - carton
+    - cleaning-supplies
+    - dusting
+    - protection-wax
+    - reactivation-shampoo
+    - stain-remover
+    - vacuum
+  - id: outdoor_furniture
+    title: Уличная Мебель и Аксессуары
+    aliases:
+    - hammock
+    - tarp
+- id: gaming
+  title: Игры
+  children:
+  - id: gaming_furniture
+    title: Игровая мебель
+    aliases:
+    - dust2
+    - battle-scarred
+    - couch
+    - ct
+    - dust-2
+    - flash
+    - flightsimulator
+    - inferno
+    - kart
+    - kart-simulator
+    - nuke
+    - parkour
+    - pixels
+    - smok
+    - spdshoes
+  - id: csgo_games
+    title: Игры CS:GO
+    aliases:
+    - map
+  - id: gaming_equipment
+    title: Игровое оборудование
+    aliases:
+    - csgo
+    - awp
+    - gun
+    - karambit
+    - katar
+    - kaypro
+    - kneebar
+    - knife2
+    - mirage
+    - molotof
+    - nade
+    - p109
+    - p172
+    - p173
+    - sensitivity
+    - shield
+    - spear
+  - id: gaming_gadgets
+    title: Игровые гаджеты
+    aliases:
+    - mouse
+    - bones
+    - crosshair
+    - dermestid
+    - gunel
+    - rattlesnake
+    - skeleton
+    - skull
+  - id: gaming_technology
+    title: Игровая техника
+    aliases:
+    - 7dof-platform
+    - energy
+    - kilowatt
+    - rtx5070
+    - ryzen
+- id: tech
+  title: Технологии
+  children:
+  - id: tech_gadgets
+    title: Технологии
+    aliases:
+    - analog-dust
+    - apple-watch
+    - apple-watch-band
+    - business-analyst
+    - chromatic-flare
+    - computer
+    - devops
+    - helmet
+    - iphone
+    - lcd
+    - macbook
+    - mi-portable
+    - micro-droplets
+    - pc-case
+    - polarized-lens
+    - software-testing
+    - solid-state-drive
+    - type-c
+    - usb-31
+    - usb-c
+  - id: software_development
+    title: Программирование
+    aliases:
+    - cto
+    - shortcuts
+    - software
+    - sql-server
+    - workspace
+  - id: product_management_tools
+    title: Управление продуктом
+    aliases:
+    - pm-memes
+    - scrum
+  - id: pc_maintenance
+    title: Обслуживание ПК
+    aliases:
+    - clean-install
+    - disk-cleanup-tool
+    - electricity
+    - registry-cleaner
+    - servis
+    - system-file-checker
+    - windows-update
+  - id: ai_and_machine_learning
+    title: ИИ и МЛ
+    aliases:
+    - ai-servis
+    - research
+    - scaling
+- id: relationships
+  title: Отношения
+- id: beauty
+  title: Красота
+  children:
+  - id: beauty_routine
+    title: Красота
+    aliases:
+    - tesori
+  - id: skincare_hacks
+    title: Уход за кожей
+    aliases:
+    - duhina
+    - microdermabrasion
+    - raspiva
+    - retinol-cream
+    - shamis
+    - soap
+    - whitening
+    - wildberries
+  - id: haircare_tips
+    title: Уход за волосами
+    aliases:
+    - hair-dye
+    - kettledrill
+    - mullet
+  - id: makeup_tutorials
+    title: Макияж
+    aliases:
+    - maison-crivelli-oud
+    - parfums-de-marly
+  - id: beard_care
+    title: Уход за бородой
+    aliases:
+    - beard-trim
+    - hairclippers
+    - mehrban
+    - reuzel
+    - tazor-razor
+  - id: nail_care
+    title: Уход за ногтями
+    aliases:
+    - nailfile
+  - id: dental_health
+    title: Зубы
+    aliases:
+    - cleaning
+    - dental-drill
+    - lasik-treatment
+  - id: wellness_routines
+    title: Восстановление
+    aliases:
+    - glutamin
+    - sunscreen
+    - sweat-lodge
+- id: fashion
+  title: Мода
+  children:
+  - id: fashion_designer
+    title: Модный дизайнер
+    aliases:
+    - djins
+    - fashiondesigner
+    - handmade
+    - wardrobe
+  - id: garment_textiles
+    title: Ткани для одежды
+    aliases:
+    - polyester
+    - shirt
+    - grid-pattern
+    - linen
+    - mesh
+    - pleats
+    - steam-stretch
+    - tee
+    - velvet
+    - wool-fabric
+  - id: street_fashion
+    title: Уличная мода
+    aliases:
+    - shorts
+    - skateboard
+    - air-force-1
+    - dunk
+    - skycostume
+  - id: activewear_workout
+    title: Спортивная одежда
+    aliases:
+    - sneakers
+    - adidas
+    - multi-textured-workout
+    - preworkout
+    - universal-training
+  - id: leather_accessories
+    title: Кожаные аксессуары
+    aliases:
+    - brown
+    - corten
+    - leatherjacket
+    - patina
+  - id: outerwear_coats
+    title: Пальто
+    aliases:
+    - bend
+    - cargo
+    - coat
+    - drawcord
+    - dyneema
+    - flannel
+    - mocassin
+    - parka
+    - sherpa-lining
+    - velvet-puffer
+- id: health
+  title: Здоровье
+  children:
+  - id: morning_habits
+    title: Утренние привычки
+    aliases:
+    - herbal-tea
+    - morning-routine
+  - id: nutrition_plans
+    title: Питание и диета
+    aliases:
+    - gluten-free
+    - lectins
+    - quinoa
+  - id: supplements_and_vitamins
+    title: Витамины для здоровья
+    aliases:
+    - zinc-supplement
+  - id: stress_management
+    title: Техники управления стрессом
+    aliases:
+    - heart-rate
+    - ibuprofen
+    - sympathetic-nervous-system
+    - vagus-nerve
+  - id: health_self_care_routines
+    title: Уход за собой
+    aliases:
+    - facial-brush
+- id: nature
+  title: Природа
+  children:
+  - id: outdoor_adventures
+    title: Приключения в природе
+    aliases:
+    - archipelago
+    - bike-route
+    - expedition
+    - forest-trail
+    - hill
+    - kutelo-peak
+    - pirin-mountains
+    - snowy-beach
+    - trekking
+  - id: wildlife_wonders
+    title: Чудеса дикой природы
+    aliases:
+    - cicada
+    - compound-eyes
+    - finger
+    - hippopotami
+    - hummingbirds
+    - kruger-national-park
+    - mandibles
+    - vole
+  - id: nature_scenery
+    title: Пейзажи природы
+    aliases:
+    - moss
+    - pond
+    - sosnovka-forest
+    - stone-wall
+    - sunset-spot
+    - wooden-staircase
+  - id: ecological_areas
+    title: Экологические зоны
+    aliases:
+    - banski-suhodol
+    - cagan-hushun
+    - ecotrope
+    - gelenjac
+    - plant
+- id: cars
+  title: Машины
+  children:
+  - id: car_mods
+    title: Модификации
+    aliases:
+    - bucket
+    - car-steering
+    - kitted
+    - modifications
+    - seat
+    - sram-axs
+    - wagon
+  - id: rally_racing
+    title: Ралли
+    aliases:
+    - rally
+  - id: classic_cars
+    title: Классика
+    aliases:
+    - porsche-factory
+    - solid-wood
+  - id: mini_cooper_clubman
+    title: Мини Купер
+    aliases:
+    - clubman
+    - drop-top
+    - mini-car
+    - mini-cooper
+  - id: tuning_and_performance
+    title: Тюнинг
+    aliases:
+    - tuning
+  - id: car_restoration
+    title: Восстановление
+    aliases:
+    - restoration
+    - upholstery
+- id: science
+  title: Наука
+  children:
+  - id: plant_science
+    title: Растениеводство
+    aliases:
+    - pitcher-plant
+    - water-lily
+  - id: psychiatry
+    title: Психиатрия
+    aliases:
+    - eur-arch-psychiatry
+    - frontiers-psychology
+    - jama-psychiatry
+    - unipolar-major-depression
+    - ventricle
+  - id: space_history
+    title: История космоса
+    aliases:
+    - black-hole
+    - kcosmos
+    - space-exploration
+    - sputnik
+  - id: lab_gear
+    title: Лабораторное оборудование
+    aliases:
+    - collector-cloth
+    - lab-coat
+    - lab-equipment
+    - superhydrophobic-coating
+    - twister-cloth
+  - id: environmental_impact
+    title: Экологическое влияние
+    aliases:
+    - anap-beach
+    - oil-spill
+    - sand
+- id: sports
+  title: Спорт
+  children:
+  - id: backpacking_adventures
+    title: Путешествия
+    aliases:
+    - tent
+    - backpacking
+    - sleeping-bag
+    - strider-high
+    - strider-low
+  - id: gym_workouts
+    title: Тренировки
+    aliases:
+    - gym-workout
+    - kxs-01
+    - scorpion-hold
+  - id: russian_sports
+    title: Российские виды спорта
+    aliases:
+    - football
+    - stoy-v-vorotah
+- id: photography
+  title: Фотография
+  children:
+  - id: analog_techniques
+    title: Аналоговая техника
+    aliases:
+    - technic
+  - id: scandinavian_landscape
+    title: Скандинавия
+    aliases:
+    - nationalpark
+    - scandinavia
+  - id: cycladic_islands
+    title: Киклады
+    aliases:
+    - cycladic-islands
+    - fishermancottage
+    - whitewashed-walls
+  - id: street_food_and_culture
+    title: Уличная еда
+    aliases:
+    - bourekas
+    - sardine
+- id: dance
+  title: Танцы
+  children:
+  - id: electronic_dance
+    title: Электронные танцы
+    aliases:
+    - vibedancecomp
+  - id: urban_dance
+    title: Городской танец
+    aliases:
+    - pavlovas
+  - id: folk_dance
+    title: Народный танец
+    aliases:
+    - balkan
+    - latini
+  - id: street_dance
+    title: Уличный танец
+    aliases:
+    - boiler-room
+    - jersey-club
+  - id: performance_art
+    title: Искусство выступлений
+    aliases:
+    - gil-scott-heron
+    - laser-show
+    - pompidou-centre
+- id: pets
+  title: Животные
+  children:
+  - id: catbreeds
+    title: Кошки
+    aliases:
+    - kitten
+    - breeder
+    - panthera
+  - id: dogbreeds
+    title: Собаки
+    aliases:
+    - cross-paw
+    - dock
+    - english-cocker-spaniel
+    - poodle
+    - poodleclip
+  - id: pet_footwear
+    title: Обувь для питомцев
+    aliases:
+    - innerturtleneck
+    - yeezy350
+  - id: groomingtools
+    title: Инструменты
+    aliases:
+    - scratching-post
+- id: gardening
+  title: Сад и огород

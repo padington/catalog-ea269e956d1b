@@ -1,2 +1,4 @@
 instagrapi
 jinja2
+telethon
+pyyaml
