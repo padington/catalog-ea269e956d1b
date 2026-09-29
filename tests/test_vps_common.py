@@ -58,13 +58,19 @@ class CaptionTest(unittest.TestCase):
     def test_limit_and_cut(self):
         item = dict(ITEM, caption={"text": "😀" * 2000})   # emoji = 2 UTF-16 units
         c = vc.caption_for(item)
-        self.assertLessEqual(vc.utf16_len(c), 1024)
-        self.assertGreater(vc.utf16_len(c), 1000)
+        self.assertLessEqual(vc.utf16_len(c), 874)
+        self.assertGreater(vc.utf16_len(c), 850)
         self.assertTrue(c.endswith("\n#nonparsed"))
         self.assertIn("…\n\nhttps://www.instagram.com/reel/", c)
         item = dict(ITEM, caption={"text": "a" * 5000})
         c = vc.caption_for(item)
-        self.assertEqual(vc.utf16_len(c), 1024)
+        self.assertEqual(vc.utf16_len(c), 874)
+        self.assertEqual(vc.utf16_len(vc.caption_for(item, reserve=0)), 1024)
+
+    def test_reserve_leaves_room_for_150_chars_of_hashtags(self):
+        c = vc.caption_for(dict(ITEM, caption={"text": "слово " * 400}))
+        tagged = c.rsplit("\n", 1)[0] + "\n" + " ".join(["#t%03d" % i for i in range(25)])[:150]
+        self.assertLessEqual(vc.utf16_len(tagged), 1024)
 
     def test_short_caption_not_cut(self):
         self.assertNotIn("…", vc.caption_for(ITEM))

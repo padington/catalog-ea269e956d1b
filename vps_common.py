@@ -15,6 +15,7 @@ import io, json, os, random, re, time, urllib.error, urllib.parse, urllib.reques
 NONPARSED = "#nonparsed"
 UNAVAILABLE = "#unavailable"
 CAPTION_LIMIT = 1024          # Telegram caption limit, counted in UTF-16 code units
+HASHTAG_RESERVE = 150         # SPEC 3.1: room for the tagger's hashtags -> caption with #nonparsed <= 874
 TEXT_LIMIT = 4096
 THUMB_MAX_SIDE = 320
 THUMB_MAX_BYTES = 190_000     # Telegram: < 200 KB
@@ -86,10 +87,12 @@ def code_from_pk(pk):
     return out or "A"
 
 
-def caption_for(item, shared_by=None, tag=NONPARSED, fallback=None, prefix="", limit=CAPTION_LIMIT):
+def caption_for(item, shared_by=None, tag=NONPARSED, fallback=None, prefix="", limit=CAPTION_LIMIT,
+                reserve=HASHTAG_RESERVE):
     """Caption by SPEC 3.1. `item` is an IG media dict (may be empty for unavailable posts);
     `fallback` = {"shortcode"|"code", "caption", "author", "taken_at"|"date"} fills gaps from the DM copy.
-    The IG text is cut so the whole caption fits `limit` UTF-16 units; the tail is never cut."""
+    The IG text is cut so the whole caption fits `limit - reserve` UTF-16 units (the reserve is room
+    for the hashtags that later replace `tag`, SPEC 3.1); the tail is never cut."""
     fb = fallback or {}
     item = item or {}
     cap = ((item.get("caption") or {}).get("text") or fb.get("caption") or "").strip()
@@ -110,7 +113,7 @@ def caption_for(item, shared_by=None, tag=NONPARSED, fallback=None, prefix="", l
     tail = "\n".join(tail_lines)
     head = prefix.strip()
     fixed = (head + "\n\n" if head else "") + tail
-    room = limit - utf16_len(fixed) - 2          # 2 = "\n\n" between text and tail
+    room = limit - reserve - utf16_len(fixed) - 2          # 2 = "\n\n" between text and tail
     if cap and room > 0:
         if utf16_len(cap) > room:
             cap = cut_utf16(cap, room - 1).rstrip() + "…"
