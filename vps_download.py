@@ -77,6 +77,20 @@ def main():
     cl.load_settings("ig_session.json")
     os.remove("ig_session.json")
 
+    if os.environ.get("MODE") == "inbox":
+        # read-only probe: can this session read DMs from here?
+        r = cl.private_request("direct_v2/inbox/", params={"limit": "5", "persistentBadging": "true"})
+        inbox = r.get("inbox", {})
+        log("viewer=%s threads=%d unseen=%s" % ((r.get("viewer") or {}).get("username"), len(inbox.get("threads", [])), inbox.get("unseen_count")))
+        for t in inbox.get("threads", []):
+            items = t.get("items", [])
+            last = max((it.get("timestamp", 0) for it in items), default=0) // 1_000_000
+            shares = sum(1 for it in items if it.get("item_type", "").startswith(("xma_", "clip", "media_share")))
+            log("  thread %s '%s' users=%d last=%s shares_in_page=%d" % (
+                t.get("thread_id"), t.get("thread_title"), len(t.get("users", [])),
+                time.strftime("%Y-%m-%d", time.gmtime(last)) if last else "?", shares))
+        return
+
     pks = [p.strip() for p in os.environ.get("PKS", "").split(",") if p.strip()]
     metas = {}
     if os.path.exists("batch.json"):
