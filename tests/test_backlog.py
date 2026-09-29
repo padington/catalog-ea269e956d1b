@@ -100,20 +100,5 @@ class ApplyTest(unittest.TestCase):
         self.assertIn("`2`", md); self.assertIn("tg: bad", md)
 
 
-class CaptionTagTest(unittest.TestCase):
-    def test_tag_line_and_limit(self):
-        os.environ.setdefault("TELEGRAM_BOT_TOKEN", "x"); os.environ.setdefault("TG_CHAT_ID", "0")
-        import vps_download
-        item = {"caption": {"text": "a" * 3000}, "user": {"username": "u"}, "code": "C", "taken_at": 0}
-        cap = vps_download.caption_for(item, {"shared_by": "me"}, tag="#nonparsed")
-        self.assertLessEqual(len(cap), 1024)
-        self.assertEqual(cap.splitlines()[-1], "#nonparsed")
-        self.assertIn("https://www.instagram.com/reel/C/", cap)
-        no = vps_download.caption_for(item, {}, tag="")
-        self.assertTrue(no.splitlines()[-1].startswith("@u"))
-        fb = vps_download.caption_for({"code": "C"}, {"caption": "from dm"}, tag="#nonparsed")
-        self.assertTrue(fb.startswith("from dm"))
-
-
 if __name__ == "__main__":
     unittest.main()

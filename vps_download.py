@@ -7,8 +7,7 @@ then delete both files immediately. No processing here — the VPS is too small;
 transcribe/vision/tags run locally from the Telegram copy.
 
 Env: IG_SESSION_JSON (base64 of ig_session.json), TELEGRAM_BOT_TOKEN,
-TG_CHAT_ID, PKS (comma-separated), DELAY (seconds between IG calls, default 6),
-TAG (optional last caption line, e.g. "#nonparsed"; empty = no tag line).
+TG_CHAT_ID, PKS (comma-separated), DELAY (seconds between IG calls, default 6).
 Output: results.jsonl — one {"pk","status","message_id","file_id",...} per pk.
 """
 import base64, json, os, sys, time, random, urllib.request, urllib.parse
@@ -16,7 +15,6 @@ import base64, json, os, sys, time, random, urllib.request, urllib.parse
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT = os.environ["TG_CHAT_ID"]
 DELAY = float(os.environ.get("DELAY", "6"))
-TAG = os.environ.get("TAG", "").strip()
 WORK = "work"
 
 
@@ -56,9 +54,8 @@ def fetch(url, path):
     return os.path.getsize(path)
 
 
-def caption_for(item, meta, tag=None):
-    tag = TAG if tag is None else tag
-    cap = ((item.get("caption") or {}).get("text") or "").strip() or (meta.get("caption") or "").strip()
+def caption_for(item, meta):
+    cap = ((item.get("caption") or {}).get("text") or "").strip()
     user = (item.get("user") or {}).get("username") or ""
     code = item.get("code") or meta.get("shortcode") or ""
     taken = item.get("taken_at")
@@ -67,8 +64,6 @@ def caption_for(item, meta, tag=None):
     tail = "https://www.instagram.com/reel/%s/\n@%s · %s" % (code, user, date)
     if shared_by:
         tail += " · from %s" % shared_by
-    if tag:
-        tail += "\n" + tag
     limit = 1024 - len(tail) - 2
     return (cap[:limit] + "\n\n" + tail).strip()
 
