@@ -1,0 +1,184 @@
+{
+ "version": 1,
+ "built_at": 1759180000,
+ "tree": [
+  {
+   "id": "cooking",
+   "title": "Готовка",
+   "children": [
+    {
+     "id": "pasta",
+     "title": "Паста",
+     "aliases": [
+      "макароны",
+      "pasta-recipe"
+     ],
+     "children": [
+      {
+       "id": "carbonara",
+       "title": "Карбонара",
+       "children": [
+        {
+         "id": "too_deep",
+         "title": "Слишком глубоко"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "id": "baking",
+     "title": "Выпечка"
+    }
+   ]
+  },
+  {
+   "id": "fitness",
+   "title": "Фитнес",
+   "children": [
+    {
+     "id": "kettlebell",
+     "title": "Гири"
+    },
+    {
+     "id": "yoga",
+     "title": "Йога"
+    }
+   ]
+  },
+  {
+   "id": "travel",
+   "title": "Путешествия",
+   "children": [
+    {
+     "id": "china",
+     "title": "Китай"
+    }
+   ]
+  }
+ ],
+ "posts": [
+  {
+   "m": 10,
+   "k": "video",
+   "t": [
+    "cooking",
+    "pasta",
+    "carbonara"
+   ],
+   "d": "2026-06-13",
+   "a": "chef",
+   "s": "Карбонара за 10 минут, гуанчиале и пекорино"
+  },
+  {
+   "m": 11,
+   "k": "video",
+   "t": [
+    "cooking",
+    "pasta"
+   ],
+   "d": "2026-06-14",
+   "a": "nonna",
+   "s": "Паста с томатами"
+  },
+  {
+   "m": 12,
+   "k": "photos",
+   "t": [
+    "cooking",
+    "baking"
+   ],
+   "d": "2026-06-15",
+   "a": "baker",
+   "s": "Хлеб на закваске"
+  },
+  {
+   "m": 13,
+   "k": "video",
+   "t": [
+    "fitness",
+    "kettlebell"
+   ],
+   "d": "",
+   "a": "",
+   "s": "Kettlebell swing for beginners"
+  },
+  {
+   "m": 14,
+   "k": "video",
+   "t": [
+    "fitness",
+    "kettlebell",
+    "free_tag"
+   ],
+   "d": "",
+   "a": "",
+   "s": "Гиря 16 кг: махи"
+  },
+  {
+   "m": 15,
+   "k": "video",
+   "t": [
+    "fitness"
+   ],
+   "d": "",
+   "a": "",
+   "s": "Разминка утром"
+  },
+  {
+   "m": 16,
+   "k": "video",
+   "t": [
+    "fitness",
+    "kettlebell"
+   ],
+   "d": "",
+   "a": "",
+   "s": "Турецкий подъём с гирей"
+  },
+  {
+   "m": 17,
+   "k": "video",
+   "t": [
+    "fitness",
+    "kettlebell"
+   ],
+   "d": "",
+   "a": "",
+   "s": "Рывок гири"
+  },
+  {
+   "m": 18,
+   "k": "video",
+   "t": [
+    "fitness",
+    "kettlebell"
+   ],
+   "d": "",
+   "a": "",
+   "s": "Толчок гири"
+  },
+  {
+   "m": 19,
+   "k": "video",
+   "t": [
+    "fitness",
+    "kettlebell"
+   ],
+   "d": "",
+   "a": "",
+   "s": "Жим гири стоя"
+  },
+  {
+   "m": 20,
+   "k": "text",
+   "t": [
+    "cooking",
+    "too_deep"
+   ],
+   "d": "",
+   "a": "",
+   "s": "ёлочные пряники"
+  }
+ ]
+}
