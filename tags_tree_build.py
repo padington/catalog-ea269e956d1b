@@ -1,17 +1,28 @@
-"""Build the first version of tags_tree.yaml from already-tagged reels (SPEC §3.4).
+"""Build tags_tree.yaml (SPEC §3.4) from already-tagged reels.
 
-One-off helper (iteration 3). Reads reels.db READ-ONLY, counts categories and
-free tags, then asks the local LLM (ollama, llama3.2) to
-  1. propose 4-10 level-2 subtopics per category from its most frequent tags;
-  2. assign every tag seen in that category to one subtopic (-> aliases).
-The result is a starting point: the owner edits tags_tree.yaml by hand later.
+Planned to be re-run once, AFTER the full backlog is in the channel; until the
+owner approves the tree, parse_channel.py runs with --l1-only.
 
     PYTHONPATH=. python tags_tree_build.py --db ~/reels-catalog/reels.db --out tags_tree.yaml
+        [--per-cat-sample 60] [--max-posts N]
 
-Known data quirk: an old tags.py prompt used ["kettlebell","deadlift",
-"home-workout"] as its example, and the model copied it into ~650 unrelated
-reels. Those tags are counted only for `fitness` posts and get their own
-fitness children with `only_with_parent: true` (see tag_normalize.py).
+Pipeline (level 1 = the closed category set of categorize.py):
+  1. load posts: categories, free tags, caption + transcript + visual;
+  2. blacklist tags (hard rule): the leaked example of an old tags.py prompt
+     (kettlebell/deadlift/home-workout) and any tag spread evenly over
+     >= SPREAD_MIN_CATS categories (no category holds >= SPREAD_MAX_SHARE of it);
+  3. per category the LLM proposes subtopics from a sample of post TEXTS
+     (caption + transcript + visual), not from tags alone;
+  4. every post of the category is assigned to one subtopic (or none) by the
+     LLM from its caption + transcript + visual;
+  5. hard rules (pure functions below, unit-tested):
+     * node id: [a-z0-9_], at most MAX_ID_WORDS words, <= MAX_ID_LEN chars,
+       not a level-1 id, unique in the tree;
+     * a node keeps >= MIN_NODE_POSTS assigned posts, else it is dropped;
+     * aliases of a node = free tags of its posts that are not blacklisted,
+       seen >= ALIAS_MIN times in the node and whose home category (where the
+       tag occurs most) is this category, so a node never overlaps another
+       category; an alias is owned by one node only (the node with most hits).
 """
 
 import argparse
@@ -23,9 +34,6 @@ import sqlite3
 import urllib.request
 
 import yaml
-
-LEAKED = ("kettlebell", "deadlift", "home-workout")
-LEAKED_TITLES = {"kettlebell": "Гири", "deadlift": "Становая тяга", "home-workout": "Тренировки дома"}
 
 # Level 1 = the closed category set of categorize.py (+ titles).
 CATEGORY_TITLES = {
@@ -40,17 +48,104 @@ CATEGORY_TITLES = {
     "travel": "Путешествия", "other": "Разное",
 }
 
+
+LEAKED = ("kettlebell", "deadlift", "home-workout")
+MAX_ID_WORDS = 2
+MAX_ID_LEN = 24
+MIN_NODE_POSTS = 10
+ALIAS_MIN = 2
+SPREAD_MIN_CATS = 5
+SPREAD_MAX_SHARE = 0.5
+TEXT_LIMIT = 700
+
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
+TRANSLATE_MODEL = os.environ.get("TREE_TRANSLATE_MODEL", "qwen2.5vl")
 
 
 def slug(s):
-    s = re.sub(r"[^a-z0-9]+", "_", str(s).lower()).strip("_")
-    return s
+    return re.sub(r"[^a-z0-9]+", "_", str(s).lower()).strip("_")
 
 
-TRANSLATE_MODEL = os.environ.get("TREE_TRANSLATE_MODEL", "qwen2.5vl")
+# --------------------------------------------------------------------------- #
+# Hard rules (pure).
+# --------------------------------------------------------------------------- #
 
+def valid_node_id(nid, taken=()):
+    """id is [a-z0-9_]+, <= MAX_ID_WORDS words, <= MAX_ID_LEN chars, not taken."""
+    return (bool(re.match(r"^[a-z0-9]+(_[a-z0-9]+)*$", nid or ""))
+            and len(nid.split("_")) <= MAX_ID_WORDS and len(nid) <= MAX_ID_LEN
+            and nid not in CATEGORY_TITLES and nid not in taken)
+
+
+def tag_category_counts(posts):
+    """{tag: Counter(category -> posts)} over the first category of each post."""
+    out = collections.defaultdict(collections.Counter)
+    for p in posts:
+        for t in set(p["tags"]):
+            out[t][p["cats"][0]] += 1
+    return out
+
+
+def blacklist(tag_cats, leaked=LEAKED, min_cats=SPREAD_MIN_CATS, max_share=SPREAD_MAX_SHARE):
+    """Leaked example tags + tags spread evenly over >= min_cats categories."""
+    bad = set(leaked)
+    for t, cc in tag_cats.items():
+        total = sum(cc.values())
+        if len(cc) >= min_cats and max(cc.values()) < max_share * total:
+            bad.add(t)
+    return bad
+
+
+def home_category(tag, tag_cats):
+    cc = tag_cats.get(tag) or {}
+    return max(sorted(cc), key=lambda c: cc[c]) if cc else None
+
+
+def build_nodes(cat, subs, assignment, posts_by_id, tag_cats, bad,
+                min_posts=MIN_NODE_POSTS, alias_min=ALIAS_MIN):
+    """Apply the hard rules to one category.
+
+    subs: [{"id","title"}] proposed subtopics (ids already validated);
+    assignment: {post_id: sub_id or None}. Returns children, each with a
+    "posts" count kept for reporting.
+    """
+    members = collections.defaultdict(list)
+    for pid, sid in assignment.items():
+        if sid is not None:
+            members[sid].append(pid)
+    hits = collections.defaultdict(collections.Counter)   # tag -> sid -> n
+    for sid, pids in members.items():
+        for pid in pids:
+            for t in set(posts_by_id[pid]["tags"]):
+                if t in bad or home_category(t, tag_cats) != cat:
+                    continue
+                hits[t][sid] += 1
+    owner = {}
+    for t, by in hits.items():
+        sid, n = max(sorted(by.items()), key=lambda kv: kv[1])
+        if n >= alias_min:
+            owner[t] = sid
+    children = []
+    for s in subs:
+        n = len(members.get(s["id"], []))
+        if n < min_posts:
+            continue
+        al = sorted((t for t, o in owner.items() if o == s["id"] and slug(t) != s["id"]),
+                    key=lambda t: (-hits[t][s["id"]], t))
+        children.append({"id": s["id"], "title": s["title"], "aliases": al, "posts": n})
+    return children
+
+
+def post_text(p, limit=TEXT_LIMIT):
+    parts = [p.get("caption"), p.get("transcript"), p.get("visual")]
+    text = " | ".join(re.sub(r"\s+", " ", x).strip() for x in parts if x and x.strip())
+    return text[:limit]
+
+
+# --------------------------------------------------------------------------- #
+# LLM + IO.
+# --------------------------------------------------------------------------- #
 
 def chat_json(system, user, model=None, temperature=0):
     payload = json.dumps({
@@ -69,127 +164,113 @@ def chat_json(system, user, model=None, temperature=0):
         return {}
 
 
-def load_counts(db_path):
-    """-> (cat_counts, per_cat_tag_counts, global_tag_counts)."""
+def load_posts(db_path):
     con = sqlite3.connect("file:%s?mode=ro" % os.path.abspath(db_path), uri=True)
-    cats = collections.Counter()
-    per_cat = collections.defaultdict(collections.Counter)
-    glob = collections.Counter()
-    for c, t in con.execute(
-            "SELECT categories, tags FROM reels WHERE tags IS NOT NULL AND tags != '[]'"):
-        cs = json.loads(c or "[]") or ["other"]
-        for x in cs:
-            cats[x] += 1
-        for tag in json.loads(t):
-            if tag in LEAKED and "fitness" not in cs:
-                continue
-            glob[tag] += 1
-            per_cat[cs[0]][tag] += 1
+    con.row_factory = sqlite3.Row
+    cols = {r[1] for r in con.execute("PRAGMA table_info(reels)")}
+    visual = "visual" if "visual" in cols else "NULL AS visual"
+    posts = []
+    for r in con.execute("SELECT pk, categories, tags, caption, transcript, %s FROM reels "
+                         "WHERE tags IS NOT NULL" % visual):
+        cats = [c for c in json.loads(r["categories"] or "[]") if c in CATEGORY_TITLES] or ["other"]
+        posts.append({"id": r["pk"], "cats": cats, "tags": json.loads(r["tags"] or "[]"),
+                      "caption": r["caption"], "transcript": r["transcript"],
+                      "visual": r["visual"]})
     con.close()
-    return cats, per_cat, glob
-
-
-def home_category(tag, per_cat):
-    return max(per_cat, key=lambda c: (per_cat[c][tag], c == "other") if tag in per_cat[c] else (-1, False))
+    return posts
 
 
 PROPOSE = (
-    "You design a tag taxonomy for a personal library of Instagram reels. Given "
-    "one top-level category and the tags seen in it (most frequent first), "
-    "propose 4 to 10 subtopics that together cover most of the tags. Subtopics "
-    "must be broad (each should fit several tags), distinct, and specific to the "
-    "category. Each id is 1-2 lowercase English words in snake_case, at most 20 "
-    "characters (it becomes a hashtag, e.g. pasta, street_food, strength). "
-    "Return JSON {\"subtopics\":[{\"id\":\"...\",\"title\":\"short English title\"}]}."
+    "You design subtopics for one top-level category of a personal library of "
+    "Instagram reels. You get short texts (caption | transcript | visual scene) of "
+    "sample reels of that category. Propose 3 to 8 subtopics that each cover MANY "
+    "of the reels, are distinct and belong to this category only. Each id is 1 or "
+    "2 lowercase English words in snake_case (it becomes a hashtag, e.g. pasta, "
+    "street_food, strength). Return JSON with key subtopics: a list of objects "
+    "with keys id and title (short English title)."
 )
 
 ASSIGN = (
-    "Assign each tag to exactly one subtopic id from the list, or to \"none\" if "
-    "no subtopic fits well. Return JSON {\"assign\":{\"<tag>\":\"<subtopic id or none>\"}} "
-    "containing every input tag."
+    "Pick the one subtopic id from the list that this reel is about, judging by "
+    "its caption, transcript and visual scene, or none if none fits well. "
+    "Return JSON with one key subtopic: the id or none."
 )
 
 TRANSLATE = (
     "Translate each English title to a short natural Russian title (1-3 words). "
-    "Return JSON {\"ru\":{\"<english>\":\"<russian>\"}}."
+    "Return JSON with key ru: an object mapping each English title to Russian."
 )
 
 
-def build(db_path, min_tag=1, max_tags_per_cat=160, verbose=True):
-    cats, per_cat, glob = load_counts(db_path)
-    home = {}
-    for tag in glob:
-        home[tag] = home_category(tag, per_cat)
+def propose(cat, sample, taken):
+    for attempt in range(3):
+        texts = "\n".join("- " + post_text(p, 300) for p in sample)
+        res = chat_json(PROPOSE, "Category: %s\nReels:\n%s" % (cat, texts),
+                        temperature=0 if attempt == 0 else 0.4)
+        subs = []
+        for s in res.get("subtopics") or []:
+            if not isinstance(s, dict):
+                continue
+            sid = slug(s.get("id", ""))
+            if valid_node_id(sid, set(taken) | {x["id"] for x in subs}):
+                subs.append({"id": sid, "title": str(s.get("title") or sid)})
+        if len(subs) >= 2:
+            return subs
+    return []
+
+
+def build(db_path, per_cat_sample=60, max_posts=None, verbose=True):
+    import random
+    posts = load_posts(db_path)
+    by_id = {p["id"]: p for p in posts}
+    tag_cats = tag_category_counts(posts)
+    bad = blacklist(tag_cats)
+    if verbose:
+        print("posts %d, blacklisted tags %d: %s" % (
+            len(posts), len(bad), ", ".join(sorted(bad)[:30])), flush=True)
+    by_cat = collections.defaultdict(list)
+    for p in posts:
+        by_cat[p["cats"][0]].append(p)
+    taken = set()
     tree = []
-    used = set(CATEGORY_TITLES) | {slug(t) for t in LEAKED}
-    for cat in sorted(CATEGORY_TITLES, key=lambda c: -cats.get(c, 0)):
+    for cat in sorted(CATEGORY_TITLES, key=lambda c: -len(by_cat.get(c, []))):
         node = {"id": cat, "title": CATEGORY_TITLES[cat]}
-        mine = [t for t, n in glob.most_common() if home.get(t) == cat and n >= min_tag]
-        mine = mine[:max_tags_per_cat]
-        fixed = []
-        if cat == "fitness":
-            # leaked example tags get their own guarded nodes (see module doc)
-            fixed = [{"id": slug(t), "title": LEAKED_TITLES[t], "aliases": [t],
-                      "only_with_parent": True} for t in LEAKED]
-            mine = [t for t in mine if t not in LEAKED]
-        if len(mine) < 3:
-            if fixed:
-                node["children"] = fixed
+        mine = [p for p in by_cat.get(cat, []) if post_text(p)]
+        if len(mine) < MIN_NODE_POSTS:
             tree.append(node)
             continue
-        subs = []
-        for attempt in range(3):
-            prop = chat_json(PROPOSE, "Category: %s\nTags: %s" % (cat, ", ".join(mine[:70])),
-                             temperature=0 if attempt == 0 else 0.4)
-            subs = []
-            for s in prop.get("subtopics") or []:
-                if not isinstance(s, dict):
-                    continue
-                sid = slug(s.get("id", ""))[:24].strip("_")
-                if sid in used:
-                    sid = ("%s_%s" % (cat, sid))[:32].strip("_")
-                if sid and sid not in used and sid not in [x["id"] for x in subs]:
-                    subs.append({"id": sid, "title": str(s.get("title") or sid)})
-            if len(subs) >= 3:
-                break
+        rnd = random.Random(cat)
+        subs = propose(cat, rnd.sample(mine, min(per_cat_sample, len(mine))), taken)
         if not subs:
             tree.append(node)
             continue
-        aliases = collections.defaultdict(list)
-        ids = [s["id"] for s in subs]
-        for i in range(0, len(mine), 40):
-            chunk = mine[i:i + 40]
-            res = chat_json(ASSIGN, "Subtopics: %s\nTags: %s" % (", ".join(ids), ", ".join(chunk)))
-            for tag, sid in (res.get("assign") or {}).items():
-                sid = slug(sid)
-                if tag in chunk and sid in ids:
-                    aliases[sid].append(tag)
-        ru = chat_json(TRANSLATE, "\n".join(s["title"] for s in subs),
-                       model=TRANSLATE_MODEL).get("ru") or {}
-        children = list(fixed)
-        for s in subs:
-            al = sorted(set(aliases[s["id"]]) - {s["id"]}, key=lambda t: (-glob[t], t))
-            if not al:
-                continue
-            child = {"id": s["id"], "title": str(ru.get(s["title"]) or s["title"]),
-                     "aliases": al}
-            children.append(child)
-            used.add(s["id"])
+        ids = [x["id"] for x in subs]
+        assignment = {}
+        for p in (mine if max_posts is None else mine[:max_posts]):
+            res = chat_json(ASSIGN, "Subtopics: %s\nReel: %s" % (", ".join(ids), post_text(p)))
+            sid = slug(res.get("subtopic", ""))
+            assignment[p["id"]] = sid if sid in ids else None
+        children = build_nodes(cat, subs, assignment, by_id, tag_cats, bad)
         if children:
+            ru = chat_json(TRANSLATE, "\n".join(c["title"] for c in children),
+                           model=TRANSLATE_MODEL).get("ru") or {}
+            if verbose:
+                print("%-13s %4d posts -> %s" % (cat, len(assignment), ", ".join(
+                    "%s(%d)" % (c["id"], c["posts"]) for c in children)), flush=True)
+            for c in children:
+                c["title"] = str(ru.get(c["title"]) or c["title"])
+                taken.add(c["id"])
+                c.pop("posts")
             node["children"] = children
         tree.append(node)
-        if verbose:
-            print("%-13s %3d tags -> %d subtopics, %d aliased" % (
-                cat, len(mine), len(children), sum(len(c["aliases"]) for c in children)), flush=True)
     return tree
 
 
 HEADER = (
-    "# Дерево тегов libinsta (SPEC §3.4). Первая версия собрана tags_tree_build.py\n"
-    "# из размеченных постов reels.db (llama3.2), дальше правится руками.\n"
-    "# id = хэштег ([a-z0-9_]+). aliases — свободные теги tags.py, которые\n"
-    "# схлопываются в узел. only_with_parent: true — тег засчитывается, только\n"
-    "# если у поста есть родительская категория (утечка примера старого промпта).\n"
+    "# Дерево тегов libinsta (SPEC §3.4), собрано tags_tree_build.py.\n"
+    "# ЧЕРНОВИК до утверждения владельцем: parse_channel.py идёт с --l1-only.\n"
+    "# id = хэштег ([a-z0-9_]+, не больше 2 слов). aliases: свободные теги tags.py,\n"
+    "# которые схлопываются в узел. Узел L2: не меньше 10 постов своей категории.\n"
 )
 
 
@@ -203,10 +284,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=os.environ.get("REELS_DB", "reels.db"))
     ap.add_argument("--out", default="tags_tree.yaml")
-    ap.add_argument("--min-tag", type=int, default=1)
+    ap.add_argument("--per-cat-sample", type=int, default=60)
+    ap.add_argument("--max-posts", type=int, help="per category, for quick trials")
     args = ap.parse_args()
-    tree = build(args.db, min_tag=args.min_tag)
-    dump(tree, args.out)
+    dump(build(args.db, args.per_cat_sample, args.max_posts), args.out)
     print("wrote", args.out)
 
 

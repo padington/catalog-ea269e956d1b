@@ -2,7 +2,7 @@
 
     PYTHONPATH=. python parse_channel.py [--limit N] [--dry-run] [--only-index]
                                          [--mode bot|user] [--ids 9,10] [--scan-all]
-                                         [--no-publish] [--force --ids ..]
+                                         [--no-publish] [--force --ids ..] [--l1-only]
 
 Flow per channel post whose last caption line is exactly `#nonparsed`:
   1. read the post over MTProto (Telethon). Bot mode (default): bots may not call
@@ -22,6 +22,10 @@ Flow per channel post whose last caption line is exactly `#nonparsed`:
   5. `tags_final`/`parsed_at` written to reels (if the columns exist — iteration
      2 adds them) and to our own table `tg_posts`; index.json rebuilt and pushed
      (index_build.py).
+
+--l1-only: hashtags are level-1 categories only (no L2 subtopics, no misc_*),
+and index.json gets the L1-only tree. Use it until the owner approves the L2
+part of tags_tree.yaml (the tree is rebuilt after the full backlog).
 
 Idempotent: a post is picked only while its last line is `#nonparsed`; every
 step is re-runnable; Ctrl-C between posts leaves consistent state.
@@ -308,11 +312,23 @@ def media_needed(conn, pk):
                for s in ("categorize", "tags"))
 
 
-def final_tags(conn, pk, index, counts):
+def l1_only(ids, index):
+    """Keep level-1 ids only (no subtopics, no misc_*)."""
+    return [i for i in ids if i in index.level1]
+
+
+def l1_tree(tree):
+    """Tree with level-1 nodes only (children dropped), for the index."""
+    return [{k: v for k, v in n.items() if k != "children"} for n in tree]
+
+
+def final_tags(conn, pk, index, counts, l1=False):
     r = row(conn, pk)
     cats = json.loads(r.get("categories") or "[]")
     tags = json.loads(r.get("tags") or "[]")
     ids = tn.normalize(cats, tags, index, counts)
+    if l1:
+        ids = l1_only(ids, index)
     return ids or ["other"]
 
 
@@ -449,7 +465,7 @@ def backup_db(path):
     log("db backup: %s" % dst)
 
 
-async def process_post(client, conn, msg, index, counts, dry_run):
+async def process_post(client, conn, msg, index, counts, dry_run, l1=False):
     kind = kind_of(msg)
     meta = parse_caption(msg.message)
     if kind == "text" or not meta["shortcode"]:
@@ -465,7 +481,7 @@ async def process_post(client, conn, msg, index, counts, dry_run):
     else:
         log("  categorize+tags already done, media not needed")
     run_stages(conn, pk, kind, paths)
-    ids = final_tags(conn, pk, index, counts)
+    ids = final_tags(conn, pk, index, counts, l1)
     new_caption = replace_last_line(msg.message, ids)
     log("  tags: %s" % tn.hashtag_line(ids))
     if dry_run:
@@ -539,7 +555,7 @@ async def amain(args):
             for i, msg in enumerate(todo, 1):
                 t0 = time.time()
                 try:
-                    await process_post(client, conn, msg, index, counts, args.dry_run)
+                    await process_post(client, conn, msg, index, counts, args.dry_run, args.l1_only)
                     ok += 1
                 except Exception as exc:
                     fail += 1
@@ -553,7 +569,8 @@ async def amain(args):
     if args.dry_run and not args.only_index:
         return
     import index_build
-    idx = index_build.build_index(conn, tn.load_tree(args.tree))
+    tree = tn.load_tree(args.tree)
+    idx = index_build.build_index(conn, l1_tree(tree) if args.l1_only else tree)
     path = index_build.write_index(idx, args.index_out)
     log("index: %d post(s) -> %s" % (len(idx["posts"]), path))
     if not args.no_publish:
@@ -567,6 +584,8 @@ def main(argv=None):
     ap.add_argument("--only-index", action="store_true")
     ap.add_argument("--mode", choices=("bot", "user"), default="bot")
     ap.add_argument("--ids", help="comma-separated message ids to consider")
+    ap.add_argument("--l1-only", action="store_true",
+                    help="hashtags = level-1 categories only (tree L2 not approved yet)")
     ap.add_argument("--force", action="store_true",
                     help="with --ids: re-tag posts whose last line is already hashtags")
     ap.add_argument("--scan-all", action="store_true",
