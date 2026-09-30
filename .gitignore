@@ -9,3 +9,9 @@ site_staging/
 media/
 *.wav
 *.mp4
+.env
+*.session
+*.session-journal
+index.json
+.libinsta-index/
+*.db.bak-*
