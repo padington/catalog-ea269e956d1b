@@ -14,7 +14,7 @@
 
 | Узел | Роль | Факты |
 |---|---|---|
-| **VPS** `vps-debian12` | Всё, что ходит в Instagram + постоянный бот-сервис | Стокгольм, Debian 12, 1 CPU / 2 GB RAM, python3.11, docker; **нет** ffmpeg, python3-venv, sudo. Self-hosted GitHub Actions runner репо `padington/tgbase`. Всё запускается в docker (`python:3.11-slim`). Instagram отсюда доступен, cookie-сессия работает (media/info и direct_v2/inbox проверены) |
+| **VPS** `vps-debian12` | Всё, что ходит в Instagram + постоянный бот-сервис | Стокгольм, Debian 12, 1 CPU / 2 GB RAM, python3.11, docker; **нет** python3-venv, sudo (ffmpeg — внутри образа libinsta-dl). Self-hosted GitHub Actions runner репо `padington/tgbase`. Всё запускается в docker (`python:3.11-slim`). Instagram отсюда доступен, cookie-сессия работает (media/info и direct_v2/inbox проверены) |
 | **Mac владельца** | Разметка (whisper-cli + ollama qwen2.5vl/llama3.2), `reels.db` — источник истины, скрипт-разметчик запускается вручную | `~/reels-catalog` (рабочая копия репо с данными, `.venv`, `media/`). Instagram с Mac **недоступен** |
 | **Канал libinsta** | Хранилище видео/фото + подписи с тегами | `chat_id = -1004300487255`, бот @libinstabot — админ (постить, редактировать) |
 | **GitHub** | код, workflows, секреты, индекс для поиска | `padington/catalog-ea269e956d1b` ветка `vps-download` (код VPS + локальный код), `padington/tgbase` (workflows: `ig-download.yml`, `libinsta-deploy.yml`, `ig-probe.yml`; секреты `IG_SESSION_JSON`, `LIBINSTA_BOT_TOKEN`; runner) |
@@ -47,9 +47,9 @@ https://www.instagram.com/reel/<code>/
 Последняя строка — только хэштеги через пробел: `#pk…` (id медиа IG, кликабельный, ключ дедупа и rebuild), источник (`#link` — запрос через бота, `#dm` — синк переписки, `#backlog` — миграция), затем `#nonparsed` либо теги. Разметчик заменяет только часть после `#pk… #src`. Всё выше не меняется (для `#dm` в строке «from …» — ещё дата шары в переписке).
 
 ### 3.2 Виды постов
-- видео (`clips`, `feed` video, карусель с видео — первый видео-слайд): `sendVideo` **обязательно** с `width`, `height`, `duration` и `thumbnail` (jpeg ≤ 320 px, < 200 KB; брать из `image_versions2.candidates` IG) — без них Telegram ломает соотношение сторон (проверено).
+- видео (`clips`, `feed` video, карусель с видео — первый видео-слайд): `sendVideo` **обязательно** с `width`, `height`, `duration` и `thumbnail` (jpeg ≤ 320 px, < 190 KB; кандидат из `image_versions2.candidates` IG, иначе даунскейл) — без них Telegram ломает соотношение сторон (проверено).
 - фото / фото-карусель: `sendMediaGroup` до 10 фото по URL с IG CDN, подпись на первом.
-- недоступные (IG вернул пустой `items`): текстовое сообщение `⚠️ unavailable` + подпись по 3.1 + `#unavailable` (не `#nonparsed`).
+- недоступные (IG вернул пустой `items` или 400/404 «Media not found»): текстовое сообщение `⚠️ unavailable` + подпись по 3.1 + `#unavailable` (не `#nonparsed`).
 
 ### 3.3 `reels.db` (Mac) — новые колонки
 `tg_message_id INTEGER, tg_file_id TEXT, tg_kind TEXT ('video'|'photos'|'text'), tg_posted_at INTEGER, tags_final TEXT (JSON), parsed_at INTEGER`.
@@ -83,7 +83,7 @@ https://www.instagram.com/reel/<code>/
 1. Разбор ссылок из текста/подписи, `media_pk_from_code`, дедуп через `/data/seen.json`, ответ владельцу (✅ msg id / ❌ причина).
 2. Все три вида постов по 3.2. `#nonparsed` в подписи.
 3. Ограничение доступа: `OWNER_IDS` (repo variable `LIBINSTA_OWNER_IDS` в tgbase); пока пусто — принимать от всех, логировать id. Команды `/start`, `/status`, `/help`.
-4. Устойчивость: throttle IG (429/challenge/login_required) → пауза 15 мин и сообщение владельцу; сервис не падает; лог в stdout; `restart unless-stopped`.
+4. Устойчивость: throttle IG (429/challenge/login_required) → пауза 30 мин и сообщение владельцу; сервис не падает; лог в stdout; `restart unless-stopped`.
 5. Деплой: `gh workflow run libinsta-deploy.yml --repo padington/tgbase --ref probe/ig-net`; проверить `docker logs`. Проверка «глазами»: отправить боту ссылку, увидеть пост в канале с правильным соотношением сторон.
 6. Тесты: разбор ссылок, сборка подписи (лимит 1024, обрезка), выбор thumbnail, выбор медиа из carousel.
 
@@ -125,4 +125,5 @@ https://www.instagram.com/reel/<code>/
 - Секреты: только через env; в PR/issue/логах — никогда. `.env`, `*.session`, `*.db`, `media/` — в `.gitignore`.
 - Перед PR: тесты зелёные, ручная проверка на 1–3 постах в канале, в описании PR — что именно проверено.
 - Ничего массового (> 150 постов в канал, полный прогон разметки) без ОК владельца.
+- 30.09: реализация скачивалки — Go-репо `padington/libinsta-dl` (свои workflows/секреты/runner, образ ghcr.io, состояние = state.json в закрепе канала, DM watcher + backfill вместо daily inbox). Python `vps_*.py` здесь — legacy. Актуальные диаграммы: libinsta-dl/docs/FLOWS.md.
 - Instagram трогать только с VPS. Bot API `getUpdates` использует только сервис на VPS — локально его не вызывать (конфликт long-polling).
