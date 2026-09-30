@@ -194,6 +194,7 @@ def ensure_tgbase(path):
 
 
 def push_batch(tgbase, payload, note):
+    ensure_tgbase(tgbase)  # other work lands on the same branch — resync before every batch
     with open(os.path.join(tgbase, BATCH_PATH), "w") as f:
         json.dump(payload, f, ensure_ascii=False, indent=1)
         f.write("\n")
@@ -202,7 +203,16 @@ def push_batch(tgbase, payload, note):
         return sh(["git", "rev-parse", "HEAD"], cwd=tgbase).strip()
     sh(["git", "-c", "user.name=libinsta-backlog", "-c", "user.email=libinsta-backlog@local",
         "commit", "-q", "-m", "backlog batch: %s" % note], cwd=tgbase)
-    sh(["git", "push", "-q", "origin", "HEAD:" + TGBASE_REF], cwd=tgbase)
+    for attempt in range(3):
+        try:
+            sh(["git", "push", "-q", "origin", "HEAD:" + TGBASE_REF], cwd=tgbase)
+            break
+        except RuntimeError as exc:
+            if "rejected" not in str(exc) or attempt == 2:
+                raise
+            log("push rejected (concurrent commit) — rebasing and retrying")
+            sh(["git", "fetch", "-q", "origin", TGBASE_REF], cwd=tgbase)
+            sh(["git", "rebase", "-q", "origin/" + TGBASE_REF], cwd=tgbase)
     return sh(["git", "rev-parse", "HEAD"], cwd=tgbase).strip()
 
 
